@@ -1,0 +1,463 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum Role {
+  ADMIN
+  RESPONDER
+  REVIEWER
+  VIEWER
+}
+
+enum SecurityDomain {
+  ACCESS_CONTROL
+  AUTHENTICATION
+  ENCRYPTION
+  DATA_PROTECTION
+  INCIDENT_RESPONSE
+  NETWORK_SECURITY
+  CLOUD_SECURITY
+  PHYSICAL_SECURITY
+  BUSINESS_CONTINUITY
+  CHANGE_MANAGEMENT
+  VULNERABILITY_MANAGEMENT
+  LOGGING_MONITORING
+  THIRD_PARTY_RISK
+  COMPLIANCE
+  PRIVACY
+  ENDPOINT_SECURITY
+  APPLICATION_SECURITY
+  IDENTITY_MANAGEMENT
+  GOVERNANCE
+  GENERAL
+}
+
+enum AnswerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FLAGGED
+  SKIPPED
+}
+
+enum QuestionnaireStatus {
+  UPLOADED
+  PARSING
+  PARSED
+  GENERATING
+  IN_REVIEW
+  COMPLETED
+  EXPORTED
+}
+
+enum QuestionType {
+  YES_NO
+  FREE_TEXT
+  MULTIPLE_CHOICE
+  EVIDENCE
+  DATE
+  NUMERIC
+}
+
+enum SourceType {
+  QUESTIONNAIRE
+  POLICY
+  INTERVIEW
+  MANUAL
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+// =============================================================================
+// Core Models
+// =============================================================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  domain    String?
+  planTier  PlanTier @default(FREE)
+  stripeCustomerId String? @unique
+  stripeSubscriptionId String?
+  confidenceThreshold  Float    @default(0.8) // CB-06: auto-approve if >= this, flag if below
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  knowledgeSources   KnowledgeSource[]
+  knowledgeEntries   KnowledgeEntry[]
+  questionnaires     Questionnaire[]
+  interviewSessions  InterviewSession[]
+  auditLogs          AuditLog[]
+  templates          QuestionnaireTemplate[]
+  invitations        OrganizationInvitation[]
+  subscription       Subscription?
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  image          String?
+  passwordHash   String?
+  role           Role      @default(RESPONDER)
+  isActive       Boolean   @default(true)
+  emailVerified  DateTime?
+  lastLoginAt    DateTime?
+  organizationId String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  answers           Answer[]           @relation("AnswerCreator")
+  reviewedAnswers   Answer[]           @relation("AnswerReviewer")
+  interviewSessions InterviewSession[]
+  auditLogs         AuditLog[]
+  accounts          Account[]
+  sessions          Session[]
+  sentInvitations   OrganizationInvitation[]
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+// NextAuth models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// =============================================================================
+// Knowledge Base
+// =============================================================================
+
+model KnowledgeSource {
+  id             String     @id @default(cuid())
+  organizationId String
+  name           String
+  sourceType     SourceType
+  fileName       String?
+  filePath       String?
+  fileSize       Int?
+  mimeType       String?
+  status         String     @default("pending") // pending, processing, completed, failed
+  errorMessage   String?
+  entriesCreated Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id])
+  knowledgeEntries KnowledgeEntry[]
+
+  @@index([organizationId])
+}
+
+model KnowledgeEntry {
+  id             String         @id @default(cuid())
+  organizationId String
+  sourceId       String?
+  question       String
+  answer         String
+  domain         SecurityDomain @default(GENERAL)
+  keywords       String[]
+  confidence     Float          @default(0.5)
+  isVerified     Boolean        @default(false)
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // pgvector embedding column (vector(768), nomic-embed-text) is added via raw SQL — see README
+  // Prisma doesn't natively support vector type, so we manage it via raw queries
+
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  source          KnowledgeSource? @relation(fields: [sourceId], references: [id])
+  answerSources   AnswerSource[]
+
+  @@index([organizationId])
+  @@index([domain])
+  @@index([sourceId])
+}
+
+// =============================================================================
+// Questionnaires
+// =============================================================================
+
+model Questionnaire {
+  id             String              @id @default(cuid())
+  organizationId String
+  name           String
+  fileName       String?
+  filePath       String?
+  status         QuestionnaireStatus @default(UPLOADED)
+  totalQuestions  Int                 @default(0)
+  answeredCount  Int                 @default(0)
+  approvedCount  Int                 @default(0)
+  rejectedCount  Int                 @default(0)
+  columnMapping  Json?               // { questionCol: "B", answerCol: "C", sheetName: "Sheet1" }
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id])
+  questions    Question[]
+  exports      QuestionnaireExport[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model Question {
+  id               String         @id @default(cuid())
+  questionnaireId  String
+  rowIndex         Int            // Original row in the spreadsheet
+  questionText     String
+  questionType     QuestionType   @default(FREE_TEXT)
+  domain           SecurityDomain @default(GENERAL)
+  originalContext  String?        // Surrounding text from the questionnaire
+  metadata         Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  questionnaire Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  answers       Answer[]
+
+  @@index([questionnaireId])
+  @@index([domain])
+}
+
+model Answer {
+  id            String       @id @default(cuid())
+  questionId    String
+  content       String
+  status        AnswerStatus @default(PENDING)
+  confidence    Float        @default(0)
+  aiGenerated   Boolean      @default(true)
+  editedContent String?      // Human-edited version
+  reviewNote    String?
+  createdById   String?
+  reviewedById  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  question  Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  createdBy User?          @relation("AnswerCreator", fields: [createdById], references: [id])
+  reviewer  User?          @relation("AnswerReviewer", fields: [reviewedById], references: [id])
+  sources   AnswerSource[]
+
+  @@index([questionId])
+  @@index([status])
+  @@index([questionId, status])
+}
+
+model AnswerSource {
+  id               String @id @default(cuid())
+  answerId         String
+  knowledgeEntryId String
+  similarity       Float
+  rank             Int
+
+  answer         Answer         @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  knowledgeEntry KnowledgeEntry @relation(fields: [knowledgeEntryId], references: [id])
+
+  @@unique([answerId, knowledgeEntryId])
+}
+
+// =============================================================================
+// Interview Sessions
+// =============================================================================
+
+model InterviewSession {
+  id               String   @id @default(cuid())
+  organizationId   String
+  userId           String
+  status           String   @default("active") // active, completed, abandoned
+  currentDomain    SecurityDomain @default(ACCESS_CONTROL)
+  domainsCompleted SecurityDomain[]
+  questionsAsked   Int      @default(0)
+  entriesCreated   Int      @default(0)
+  conversationLog  Json?    // Array of { role, content, domain, timestamp }
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// =============================================================================
+// Exports
+// =============================================================================
+
+model QuestionnaireExport {
+  id              String @id @default(cuid())
+  questionnaireId String
+  fileName        String
+  filePath        String
+  format          String @default("xlsx") // xlsx, csv
+  createdAt       DateTime @default(now())
+
+  questionnaire Questionnaire @relation(fields: [questionnaireId], references: [id])
+
+  @@index([questionnaireId])
+}
+
+// =============================================================================
+// Questionnaire Templates (CB-03)
+// =============================================================================
+
+model QuestionnaireTemplate {
+  id             String         @id @default(cuid())
+  organizationId String?        // null = global/built-in template
+  name           String
+  description    String?
+  framework      String?        // e.g. "SIG Lite", "CAIQ", "VSA", "NIST CSF"
+  version        String         @default("1.0")
+  isBuiltIn      Boolean        @default(false)
+  isActive       Boolean        @default(true)
+  questionCount  Int            @default(0)
+  domains        SecurityDomain[]
+  questions      Json           @default("[]") // Array of { text, type, domain, required }
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([framework])
+  @@index([isBuiltIn])
+}
+
+// =============================================================================
+// Team Invitations (CB-02)
+// =============================================================================
+
+model OrganizationInvitation {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String
+  role           Role     @default(RESPONDER)
+  token          String   @unique
+  invitedById    String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation(fields: [invitedById], references: [id])
+
+  @@unique([organizationId, email])
+  @@index([token])
+  @@index([email])
+}
+
+// =============================================================================
+// Billing (CB-01)
+// =============================================================================
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  TRIALING
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  organizationId       String             @unique
+  stripeCustomerId     String             @unique
+  stripeSubscriptionId String?            @unique
+  plan                 PlanTier           @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([stripeCustomerId])
+}
+
+model UsageRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  metric         String   // e.g. "questionnaires", "kb_entries", "ai_generations"
+  count          Int      @default(0)
+  period         DateTime // first day of the billing period (month)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, metric, period])
+  @@index([organizationId])
+  @@index([period])
+}
+
+// =============================================================================
+// Audit Log
+// =============================================================================
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String   // e.g. "answer.approve", "knowledge.create", "questionnaire.export"
+  entityType     String?  // e.g. "Answer", "KnowledgeEntry", "Questionnaire"
+  entityId       String?
+  details        Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([action])
+  @@index([createdAt])
+}

@@ -1,0 +1,27 @@
+# CompliBot — Caddy reverse proxy (automatic Let's Encrypt TLS)
+#
+# Set COMPLIBOT_DOMAIN in deploy/.env.prod (e.g. app.complibot.com).
+# Caddy provisions + renews the certificate automatically on first request,
+# so the VPS must have ports 80 and 443 open and DNS A record pointing here.
+
+{$COMPLIBOT_DOMAIN} {
+	encode zstd gzip
+
+	# App is reached over the compose network — never exposed to the host in prod.
+	reverse_proxy complibot-app:3000
+
+	# Security headers (Caddy already sets sane TLS defaults).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Stripe webhooks + the app's own routes are all under the same origin,
+	# so no extra path handling is needed.
+	request_body {
+		max_size 25MB
+	}
+}
