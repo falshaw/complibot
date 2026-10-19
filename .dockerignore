@@ -1,0 +1,30 @@
+node_modules
+.next
+.git
+*.log
+*.md
+.env
+.env.*
+.env.local
+.env.*.local
+# Patterns are matched against the WHOLE relative path — the root-anchored
+# entries above do NOT cover deploy/.env.prod, which holds live Stripe keys
+# (audit 2026-08-09 P2).
+**/.env
+**/.env.*
+!**/.env.example
+deploy
+npm-debug.log*
+.DS_Store
+Thumbs.db
+tests
+__tests__
+coverage
+*.spec.ts
+*.test.ts
+Dockerfile
+docker-compose*.yml
+.dockerignore
+.gitignore
+.vscode
+.claude

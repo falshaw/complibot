@@ -1,0 +1,34 @@
+[
+  {
+    "id": "q1",
+    "question": "Is customer data encrypted at rest?",
+    "domain": "ENCRYPTION",
+    "reference": "Yes. All customer data is encrypted at rest using AES-256.",
+    "predicted": "Yes, data at rest is encrypted with AES-256 across all stores.",
+    "confidence": 0.92
+  },
+  {
+    "id": "q2",
+    "question": "Do you enforce multi-factor authentication for admin access?",
+    "domain": "AUTHENTICATION",
+    "reference": "Yes, MFA is enforced for all administrative and privileged access.",
+    "predicted": "Yes, multi-factor authentication is required for admin accounts.",
+    "confidence": 0.88
+  },
+  {
+    "id": "q3",
+    "question": "Do you allow shared user accounts?",
+    "domain": "ACCESS_CONTROL",
+    "reference": "No. Shared accounts are prohibited; every user has a unique identity.",
+    "predicted": "No, shared accounts are not permitted.",
+    "confidence": 0.81
+  },
+  {
+    "id": "q4",
+    "question": "What is your data breach notification timeline?",
+    "domain": "INCIDENT_RESPONSE",
+    "reference": "We notify affected customers within 72 hours of confirming a breach.",
+    "predicted": "Customers are informed within 72 hours of a confirmed incident.",
+    "confidence": 0.7
+  }
+]
