@@ -1,15 +1,35 @@
 /**
- * CompliBot - Embedding Service
- * Uses Ollama nomic-embed-text (768 dimensions) for vector embeddings.
- * Stores embeddings in pgvector column on KnowledgeEntry.
+ * CompliBot - Embedding Service (optional)
+ * Uses an Ollama embedding model (default nomic-embed-text, 768 dimensions)
+ * and stores vectors in the pgvector column KnowledgeEntry.embedding.
+ *
+ * Set EMBEDDING_MODEL=none to switch semantic search off. If the model is
+ * missing in Ollama, semantic search pauses for a few minutes after the first
+ * failure and keyword search carries on alone.
  */
 
 import { getPool } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { ollamaFetchWithBreaker } from "@/lib/ollama";
 
-const EMBEDDING_MODEL = "nomic-embed-text";
+const EMBEDDING_MODEL = (
+  process.env.EMBEDDING_MODEL ?? "nomic-embed-text"
+).trim();
 const EMBEDDING_DIMENSIONS = 768;
+const RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
+
+let unavailableUntil = 0;
+
+/** False when EMBEDDING_MODEL=none or after a recent embedding/search failure. */
+export function embeddingsEnabled(): boolean {
+  if (!EMBEDDING_MODEL || EMBEDDING_MODEL.toLowerCase() === "none") return false;
+  return Date.now() >= unavailableUntil;
+}
+
+/** Pause semantic search after a failure (model not pulled, no pgvector column, ...). */
+export function markEmbeddingsUnavailable(): void {
+  unavailableUntil = Date.now() + RETRY_AFTER_FAILURE_MS;
+}
 
 /**
  * Generate embedding for a single text string via Ollama
@@ -85,6 +105,7 @@ export async function embedKnowledgeEntry(
   question: string,
   answer: string,
 ): Promise<void> {
+  if (!embeddingsEnabled()) return;
   logger.ai.embed("start", { entryId });
   try {
     const text = `Q: ${question}\nA: ${answer}`;
@@ -92,6 +113,7 @@ export async function embedKnowledgeEntry(
     await storeEmbedding(entryId, embedding);
     logger.ai.embed("success", { entryId });
   } catch (error) {
+    markEmbeddingsUnavailable();
     logger.ai.embed("error", {
       entryId,
       error: error instanceof Error ? error.message : String(error),

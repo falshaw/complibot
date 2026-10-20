@@ -237,12 +237,14 @@ export async function processResponse(
           },
         });
 
-        // Generate embedding in background
+        // Generate embedding in background (optional; keyword search works without it)
         embedKnowledgeEntry(
           entry.id,
           extracted.question,
           extracted.answer,
-        ).catch((e) => console.error("KB embedding failed:", e));
+        ).catch(() => {
+          /* logged and paused inside embedKnowledgeEntry */
+        });
         entriesCreated = 1;
       }
     } catch {
