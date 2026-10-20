@@ -102,3 +102,13 @@ export function confidenceColor(confidence: number, threshold = 0.8): string {
 export function pct(part: number, whole: number): number {
   return whole > 0 ? Math.round((part / whole) * 100) : 0;
 }
+
+/** Question types, in the order the template editor offers them. */
+export const QUESTION_TYPES = [
+  "YES_NO",
+  "FREE_TEXT",
+  "MULTIPLE_CHOICE",
+  "EVIDENCE",
+  "DATE",
+  "NUMERIC",
+] as const;

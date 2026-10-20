@@ -1,21 +1,40 @@
 /**
  * CompliBot - Single Template API
- * CB-03: Get, update, delete, and clone templates.
+ * GET: one template with its questions (built-in or the organization's own)
+ * PATCH: edit a custom template
+ * DELETE: delete a custom template
+ * POST: copy a template into the organization's own templates
+ *
+ * Built-in templates are read-only: PATCH and DELETE only find templates the
+ * organization owns. Assessments started from a template keep their own copy
+ * of the questions, so editing or deleting a template never changes them.
  */
 
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { apiHandler } from "@/lib/apiHandler";
+import { audit } from "@/lib/audit";
 import prisma from "@/lib/prisma";
+import { templateStats, updateTemplateSchema } from "@/lib/validators/template";
 
-/**
- * GET /api/templates/[id]
- * Get full template with questions.
- */
+const WRITERS = ["ADMIN", "RESPONDER"] as const;
+
+const builtInOrMissing = () =>
+  NextResponse.json(
+    { error: "Template not found, or it is a built-in template (built-ins are read-only)" },
+    { status: 404 },
+  );
+
+function ownTemplate(id: string, organizationId: string) {
+  return prisma.questionnaireTemplate.findFirst({
+    where: { id, organizationId, isBuiltIn: false, isActive: true },
+  });
+}
+
 export const GET = apiHandler(async ({ params, organizationId }) => {
   const template = await prisma.questionnaireTemplate.findFirst({
     where: {
       id: params.id,
+      isActive: true,
       OR: [{ isBuiltIn: true }, { organizationId }],
     },
   });
@@ -27,114 +46,103 @@ export const GET = apiHandler(async ({ params, organizationId }) => {
   return NextResponse.json({ success: true, template });
 });
 
-const updateSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).optional(),
-  framework: z.string().max(100).optional(),
-  isActive: z.boolean().optional(),
-  questions: z
-    .array(
-      z.object({
-        text: z.string().min(1),
-        type: z
-          .enum(["YES_NO", "FREE_TEXT", "MULTIPLE_CHOICE", "EVIDENCE"])
-          .default("FREE_TEXT"),
-        domain: z.string().default("GENERAL"),
-        required: z.boolean().default(true),
-      }),
-    )
-    .optional(),
-});
-
-/**
- * PATCH /api/templates/[id]
- * Update org-owned template (cannot edit built-in).
- */
 export const PATCH = apiHandler(
-  async ({ params, body, organizationId }) => {
-    const existing = await prisma.questionnaireTemplate.findFirst({
-      where: { id: params.id, organizationId },
-    });
-
-    if (!existing) {
-      return NextResponse.json(
-        { error: "Template not found or is built-in" },
-        { status: 404 },
-      );
-    }
-
-    const data: Record<string, unknown> = {};
-    if (body.name !== undefined) data.name = body.name;
-    if (body.description !== undefined) data.description = body.description;
-    if (body.framework !== undefined) data.framework = body.framework;
-    if (body.isActive !== undefined) data.isActive = body.isActive;
-    if (body.questions !== undefined) {
-      data.questions = body.questions as object[];
-      data.questionCount = body.questions.length;
-      data.domains = [...new Set(body.questions.map((q) => q.domain))];
-    }
+  async ({ req, params, body, user, organizationId }) => {
+    const existing = await ownTemplate(params.id, organizationId);
+    if (!existing) return builtInOrMissing();
 
     const template = await prisma.questionnaireTemplate.update({
       where: { id: params.id },
-      data,
+      data: {
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.description !== undefined && { description: body.description || null }),
+        ...(body.framework !== undefined && { framework: body.framework || null }),
+        ...(body.questions !== undefined && {
+          questions: body.questions,
+          ...templateStats(body.questions),
+        }),
+      },
+    });
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "template.update",
+      entityType: "QuestionnaireTemplate",
+      entityId: template.id,
+      details: {
+        name: template.name,
+        questions: template.questionCount,
+        ...(existing.name !== template.name && { renamedFrom: existing.name }),
+      },
+      req,
     });
 
     return NextResponse.json({ success: true, template });
   },
-  { schema: updateSchema },
+  { schema: updateTemplateSchema, roles: [...WRITERS] },
 );
 
-/**
- * DELETE /api/templates/[id]
- * Soft-delete org template.
- */
-export const DELETE = apiHandler(async ({ params, organizationId }) => {
-  const existing = await prisma.questionnaireTemplate.findFirst({
-    where: { id: params.id, organizationId },
-  });
+export const DELETE = apiHandler(
+  async ({ req, params, user, organizationId }) => {
+    const existing = await ownTemplate(params.id, organizationId);
+    if (!existing) return builtInOrMissing();
 
-  if (!existing) {
-    return NextResponse.json(
-      { error: "Template not found or is built-in" },
-      { status: 404 },
-    );
-  }
+    await prisma.questionnaireTemplate.delete({ where: { id: params.id } });
 
-  await prisma.questionnaireTemplate.update({
-    where: { id: params.id },
-    data: { isActive: false },
-  });
-
-  return NextResponse.json({ success: true });
-});
-
-/**
- * POST /api/templates/[id]
- * Clone a template (built-in or own) into org.
- */
-export const POST = apiHandler(async ({ params, organizationId }) => {
-  const source = await prisma.questionnaireTemplate.findFirst({
-    where: {
-      id: params.id,
-      OR: [{ isBuiltIn: true }, { organizationId }],
-    },
-  });
-
-  if (!source) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
-  }
-
-  const clone = await prisma.questionnaireTemplate.create({
-    data: {
+    await audit({
       organizationId,
-      name: `${source.name} (Copy)`,
-      description: source.description,
-      framework: source.framework,
-      questionCount: source.questionCount,
-      domains: source.domains,
-      questions: source.questions as object[],
-    },
-  });
+      userId: user.id,
+      action: "template.delete",
+      entityType: "QuestionnaireTemplate",
+      entityId: params.id,
+      details: { name: existing.name, questions: existing.questionCount },
+      req,
+    });
 
-  return NextResponse.json({ success: true, template: clone }, { status: 201 });
-});
+    return NextResponse.json({ success: true });
+  },
+  { roles: [...WRITERS] },
+);
+
+export const POST = apiHandler(
+  async ({ req, params, user, organizationId }) => {
+    const source = await prisma.questionnaireTemplate.findFirst({
+      where: {
+        id: params.id,
+        isActive: true,
+        OR: [{ isBuiltIn: true }, { organizationId }],
+      },
+    });
+
+    if (!source) {
+      return NextResponse.json({ error: "Template not found" }, { status: 404 });
+    }
+
+    const clone = await prisma.questionnaireTemplate.create({
+      data: {
+        organizationId,
+        name: `${source.name} (copy)`,
+        description: source.description,
+        framework: source.framework,
+        version: source.version,
+        questionCount: source.questionCount,
+        domains: source.domains,
+        questions: source.questions ?? [],
+      },
+    });
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "template.copy",
+      entityType: "QuestionnaireTemplate",
+      entityId: clone.id,
+      details: { name: clone.name, from: source.name },
+      req,
+    });
+
+    return NextResponse.json({ success: true, template: clone }, { status: 201 });
+  },
+  { roles: [...WRITERS] },
+);
