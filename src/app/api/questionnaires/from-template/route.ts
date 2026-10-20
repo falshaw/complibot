@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
+import { assessmentName } from "@/lib/services/assessmentName";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 
@@ -54,7 +55,7 @@ export const POST = apiHandler(
     const questionnaire = await prisma.questionnaire.create({
       data: {
         organizationId,
-        name: body.name || `${template.name} Assessment`,
+        name: body.name || assessmentName(template.name),
         status: "PARSED",
         totalQuestions: questions.length,
         metadata: {
