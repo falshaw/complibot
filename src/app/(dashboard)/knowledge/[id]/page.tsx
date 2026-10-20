@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { KnowledgeForm, type KnowledgeFormValues } from "@/components/KnowledgeForm";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel } from "@/lib/ui/labels";
@@ -37,6 +38,8 @@ export default function KnowledgeEntryPage() {
   const [missing, setMissing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     fetch(`/api/knowledge/${id}`).then(async (r) => {
@@ -66,16 +69,16 @@ export default function KnowledgeEntryPage() {
   }
 
   async function remove() {
-    if (!confirm("Delete this knowledge entry? Answers that cited it keep their text.")) return;
     setBusy(true);
-    const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
-    if (res.ok) {
+    setDeleteError("");
+    const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" }).catch(() => null);
+    if (res?.ok) {
       toast.success("Entry deleted");
       router.push("/knowledge");
-    } else {
-      toast.error("Could not delete the entry");
-      setBusy(false);
+      return;
     }
+    setDeleteError(res?.status === 403 ? "Your role cannot delete knowledge entries." : "The entry was not deleted. Try again.");
+    setBusy(false);
   }
 
   if (missing) {
@@ -120,7 +123,10 @@ export default function KnowledgeEntryPage() {
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)} disabled={busy}>
                 Edit
               </button>
-              <button type="button" className="btn btn-danger btn-sm" onClick={remove} disabled={busy}>
+              <button type="button" className="btn btn-danger btn-sm" onClick={() => {
+                  setDeleteError("");
+                  setConfirmDelete(true);
+                }} disabled={busy}>
                 Delete
               </button>
             </>
@@ -175,6 +181,21 @@ export default function KnowledgeEntryPage() {
           </>
         )}
       </section>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this knowledge entry?"
+        confirmLabel="Delete entry"
+        busy={busy}
+        error={deleteError}
+        onConfirm={remove}
+        onCancel={() => setConfirmDelete(false)}
+      >
+        <p>
+          <b className="text-ink">{entry.question}</b> will be removed from the knowledge base. Answers that cited it keep
+          their text but lose the citation. This cannot be undone.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }
