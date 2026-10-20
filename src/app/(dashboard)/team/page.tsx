@@ -210,14 +210,14 @@ export default function TeamPage() {
       )}
 
       <section className="card mb-4 overflow-x-auto">
-        <table className="data-table">
+        {/* On a phone, role and action share one cell so the table fits 390 px. */}
+        <table className="data-table max-sm:[&_td]:px-3 max-sm:[&_th]:px-3">
           <thead>
             <tr>
               <th>Member</th>
-              <th>Role</th>
               <th className="hidden sm:table-cell">Last sign-in</th>
               <th>
-                <span className="sr-only">Actions</span>
+                Role<span className="sr-only"> and actions</span>
               </th>
             </tr>
           </thead>
@@ -227,12 +227,12 @@ export default function TeamPage() {
               const self = m.id === me;
               return (
                 <tr key={m.id}>
-                  <td className="max-w-[260px]">
+                  <td>
                     <div className={`flex items-center gap-2.5 ${m.isActive ? "" : "opacity-60"}`}>
                       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-bold text-white" aria-hidden>
                         {(m.name || m.email)[0].toUpperCase()}
                       </span>
-                      <span className="min-w-0">
+                      <span className="min-w-0 max-w-[110px] sm:max-w-[240px]">
                         <b className="block truncate font-semibold">
                           {m.name || m.email}
                           {self && <span className="ml-1.5 text-xs font-normal text-ink-45">(you)</span>}
@@ -241,74 +241,74 @@ export default function TeamPage() {
                       </span>
                     </div>
                   </td>
-                  <td>
-                    {isAdmin && !self && m.isActive ? (
-                      <select
-                        className="input !h-8 !w-36 !text-[13px]"
-                        aria-label={`Role of ${m.email}`}
-                        value={m.role}
-                        disabled={busy}
-                        onChange={(e) =>
-                          run(
-                            fetch("/api/team/members", {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ userId: m.id, role: e.target.value }),
-                            }),
-                            `Role changed to ${roleOf(e.target.value).label}`,
-                            "Could not change the role",
-                          )
-                        }
-                      >
-                        {ROLES.map((x) => (
-                          <option key={x.id} value={x.id}>
-                            {x.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : m.isActive ? (
-                      <span className={`badge ${r.badge}`}>{r.label}</span>
-                    ) : (
-                      <span className="badge b-grey">Removed · {r.label}</span>
-                    )}
-                  </td>
                   <td className="hidden text-xs text-ink-65 sm:table-cell">{m.lastLoginAt ? shortDate(m.lastLoginAt) : "never"}</td>
-                  <td className="text-right">
-                    {isAdmin && !self && m.isActive && (
-                      <button
-                        type="button"
-                        className="btn btn-danger btn-sm"
-                        disabled={busy}
-                        onClick={() => {
-                          setRemoveError("");
-                          setRemoving(m);
-                        }}
-                        aria-label={`Remove ${m.email}`}
-                      >
-                        Remove
-                      </button>
-                    )}
-                    {isAdmin && !self && !m.isActive && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={busy}
-                        aria-label={`Reactivate ${m.email}`}
-                        onClick={() =>
-                          run(
-                            fetch("/api/team/members", {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ userId: m.id, isActive: true }),
-                            }),
-                            `${m.email} reactivated`,
-                            "Could not reactivate the member",
-                          )
-                        }
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Reactivate
-                      </button>
-                    )}
+                  <td>
+                    <div className="flex flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
+                      {isAdmin && !self && m.isActive ? (
+                        <select
+                          className="input !h-8 !w-28 !text-[13px] sm:!w-36"
+                          aria-label={`Role of ${m.email}`}
+                          value={m.role}
+                          disabled={busy}
+                          onChange={(e) =>
+                            run(
+                              fetch("/api/team/members", {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ userId: m.id, role: e.target.value }),
+                              }),
+                              `Role changed to ${roleOf(e.target.value).label}`,
+                              "Could not change the role",
+                            )
+                          }
+                        >
+                          {ROLES.map((x) => (
+                            <option key={x.id} value={x.id}>
+                              {x.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : m.isActive ? (
+                        <span className={`badge ${r.badge}`}>{r.label}</span>
+                      ) : (
+                        <span className="badge b-grey">Removed · {r.label}</span>
+                      )}
+                      {isAdmin && !self && m.isActive && (
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          disabled={busy}
+                          onClick={() => {
+                            setRemoveError("");
+                            setRemoving(m);
+                          }}
+                          aria-label={`Remove ${m.email}`}
+                        >
+                          Remove
+                        </button>
+                      )}
+                      {isAdmin && !self && !m.isActive && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={busy}
+                          aria-label={`Reactivate ${m.email}`}
+                          onClick={() =>
+                            run(
+                              fetch("/api/team/members", {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ userId: m.id, isActive: true }),
+                              }),
+                              `${m.email} reactivated`,
+                              "Could not reactivate the member",
+                            )
+                          }
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Reactivate
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
