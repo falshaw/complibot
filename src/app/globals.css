@@ -693,4 +693,15 @@
   input[type="range"] {
     accent-color: var(--accent);
   }
+
+  /* Confirm and edit dialogs: glass panel over a dimmed, blurred page */
+  .confirm-dialog {
+    background: color-mix(in srgb, var(--canvas) 95%, transparent);
+    max-height: calc(100dvh - 32px);
+  }
+  .confirm-dialog::backdrop {
+    background: rgba(10, 15, 25, 0.38);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
 }

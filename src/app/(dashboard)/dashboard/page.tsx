@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import {
   BookOpen,
   CircleAlert,
@@ -8,7 +7,7 @@ import {
   Table2,
   Upload,
 } from "lucide-react";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import { getDashboardData, COVERED_MIN_ENTRIES } from "@/lib/dashboard";
 import { ConfidenceRing } from "@/components/ui/ConfidenceRing";
 import {
@@ -110,8 +109,9 @@ function CoverageDonut({ covered, total }: { covered: number; total: number }) {
 }
 
 export default async function DashboardPage() {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
+  // The layout shows the sign-in / account-removed screens.
+  const session = await getSession();
+  if (!session) return null;
   const d = await getDashboardData(session.user.organizationId);
 
   const today = new Date().toLocaleDateString("en-GB", {

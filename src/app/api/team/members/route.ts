@@ -71,10 +71,13 @@ export const PUT = apiHandler(
     await audit({
       organizationId,
       userId: user.id,
-      action: "team.member_update",
+      action:
+        body.isActive === true && !target.isActive
+          ? "team.member_reactivate"
+          : "team.member_update",
       entityType: "User",
       entityId: updated.id,
-      details: { role: body.role, isActive: body.isActive },
+      details: { email: target.email, role: body.role, isActive: body.isActive },
       req,
     });
 

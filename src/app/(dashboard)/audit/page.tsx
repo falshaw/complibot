@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, ScrollText, Search } from "lucide-react";
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 
@@ -28,12 +28,13 @@ const ENTITY_TYPES = [
   "InterviewSession",
   "Organization",
   "OrganizationInvitation",
+  "QuestionnaireTemplate",
   "User",
 ];
 
 function actionTone(action: string) {
   if (/delete|reject|remove|revoke/.test(action)) return "b-red";
-  if (/approve|verify|complete/.test(action)) return "b-teal";
+  if (/approve|verify|complete|join|reactivate/.test(action)) return "b-teal";
   if (/edit|update|regenerate/.test(action)) return "b-amber";
   return "b-blue";
 }
@@ -73,26 +74,24 @@ export default function AuditPage() {
     return () => clearTimeout(t);
   }, [action]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    let cancelled = false;
     const params = new URLSearchParams({ page: String(page), limit: "50" });
     if (actionQuery) params.set("action", actionQuery);
     if (entity) params.set("entityType", entity);
-    try {
-      const res = await fetch(`/api/audit-logs?${params}`);
-      const json = await res.json();
-      setLogs(json.data || []);
-      setPg(json.pagination || { page: 1, total: 0, totalPages: 0 });
-    } catch {
-      setLogs([]);
-    } finally {
-      setLoading(false);
-    }
+    fetch(`/api/audit-logs?${params}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        setLogs(json.data || []);
+        setPg(json.pagination || { page: 1, total: 0, totalPages: 0 });
+      })
+      .catch(() => !cancelled && setLogs([]))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, [page, actionQuery, entity]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   return (
     <>

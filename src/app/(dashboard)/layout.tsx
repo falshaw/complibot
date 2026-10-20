@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
+import { AccountInactive } from "@/components/AccountInactive";
 import { AppBackground } from "@/components/AppBackground";
 import { Sidebar } from "@/components/Sidebar";
 
@@ -10,8 +12,10 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
+  if (!(await auth())?.user) redirect("/login");
+  // Signed in, but removed from the team since: no app, only a sign-out.
+  const session = await getSession();
+  if (!session) return <AccountInactive />;
 
   return (
     <>

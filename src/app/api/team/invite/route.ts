@@ -1,21 +1,25 @@
 /**
- * CompliBot — Team Invitation API (CB-02)
+ * CompliBot - Team invitations (admin)
  * GET: list pending invitations
- * POST: send invitation
- * DELETE: revoke invitation
+ * POST: create an invitation and return its one-time join link
+ * DELETE: revoke an invitation
+ *
+ * CompliBot sends no email: the join link is returned once, shown to the
+ * admin, and only its hash is stored (see src/lib/invitations.ts).
  */
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { inviteExpiry, joinUrl, newInviteToken } from "@/lib/invitations";
+import { emailSchema } from "@/lib/validators/password";
 
-// GET /api/team/invite — list pending invitations
+// GET /api/team/invite: pending (not accepted, not expired) invitations
 export const GET = apiHandler(async ({ organizationId }) => {
   const invitations = await prisma.organizationInvitation.findMany({
-    where: { organizationId, acceptedAt: null },
+    where: { organizationId, acceptedAt: null, expiresAt: { gt: new Date() } },
     select: {
       id: true,
       email: true,
@@ -29,62 +33,59 @@ export const GET = apiHandler(async ({ organizationId }) => {
   return NextResponse.json(invitations);
 });
 
-// POST /api/team/invite — create invitation
 const inviteSchema = z.object({
-  email: z.string().email(),
-  role: z
-    .enum(["ADMIN", "RESPONDER", "REVIEWER", "VIEWER"])
-    .default("RESPONDER"),
+  email: emailSchema,
+  role: z.enum(["ADMIN", "RESPONDER", "REVIEWER", "VIEWER"]).default("RESPONDER"),
 });
 
+// POST /api/team/invite: create an invitation
 export const POST = apiHandler(
   async ({ req, body, user, organizationId }) => {
-    // Check if user already exists in org
-    const existing = await prisma.user.findFirst({
-      where: { email: body.email, organizationId },
+    const existing = await prisma.user.findUnique({
+      where: { email: body.email },
+      select: { organizationId: true, isActive: true },
     });
     if (existing) {
-      return NextResponse.json(
-        { error: "User already in organization" },
-        { status: 409 },
-      );
+      const message =
+        existing.organizationId !== organizationId
+          ? "An account with this email already exists."
+          : existing.isActive
+            ? "This person is already a member of the team."
+            : "This person was removed from the team. Reactivate them in the member list instead.";
+      return NextResponse.json({ error: message }, { status: 409 });
     }
 
-    // Check if invitation already pending
-    const pendingInvite = await prisma.organizationInvitation.findFirst({
-      where: {
-        organizationId,
-        email: body.email,
-        acceptedAt: null,
-        expiresAt: { gt: new Date() },
-      },
+    const now = new Date();
+    const previous = await prisma.organizationInvitation.findUnique({
+      where: { organizationId_email: { organizationId, email: body.email } },
     });
-    if (pendingInvite) {
+    if (previous && !previous.acceptedAt && previous.expiresAt > now) {
       return NextResponse.json(
-        { error: "Invitation already pending for this email" },
+        {
+          error:
+            "An invitation for this email is still open. Revoke it first to create a new link.",
+        },
         { status: 409 },
       );
     }
 
-    const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-    const invitation = await prisma.organizationInvitation.create({
-      data: {
-        organizationId,
-        email: body.email,
-        role: body.role,
-        token,
-        invitedById: user.id,
-        expiresAt,
-      },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        token: true,
-        expiresAt: true,
-      },
+    const { token, tokenHash } = newInviteToken();
+    const invitation = await prisma.$transaction(async (tx) => {
+      // An expired or used invitation for the same email gives way to the new one.
+      if (previous) {
+        await tx.organizationInvitation.delete({ where: { id: previous.id } });
+      }
+      return tx.organizationInvitation.create({
+        data: {
+          organizationId,
+          email: body.email,
+          role: body.role,
+          token: tokenHash,
+          invitedById: user.id,
+          expiresAt: inviteExpiry(now.getTime()),
+        },
+        select: { id: true, email: true, role: true, expiresAt: true },
+      });
     });
 
     await audit({
@@ -97,19 +98,19 @@ export const POST = apiHandler(
       req,
     });
 
-    return NextResponse.json({
-      ...invitation,
-      inviteUrl: `/join?token=${token}`,
-    });
+    const baseUrl = process.env.NEXTAUTH_URL || req.nextUrl.origin;
+    return NextResponse.json(
+      { ...invitation, inviteUrl: joinUrl(baseUrl, token) },
+      { status: 201 },
+    );
   },
   { schema: inviteSchema, roles: ["ADMIN"] },
 );
 
-// DELETE /api/team/invite — revoke invitation
+// DELETE /api/team/invite?id=...: revoke an invitation
 export const DELETE = apiHandler(
   async ({ req, user, organizationId }) => {
-    const { searchParams } = new URL(req.url);
-    const invitationId = searchParams.get("id");
+    const invitationId = new URL(req.url).searchParams.get("id");
     if (!invitationId) {
       return NextResponse.json({ error: "id required" }, { status: 400 });
     }
@@ -118,15 +119,10 @@ export const DELETE = apiHandler(
       where: { id: invitationId, organizationId },
     });
     if (!invitation) {
-      return NextResponse.json(
-        { error: "Invitation not found" },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
     }
 
-    await prisma.organizationInvitation.delete({
-      where: { id: invitationId },
-    });
+    await prisma.organizationInvitation.delete({ where: { id: invitationId } });
     await audit({
       organizationId,
       userId: user.id,
