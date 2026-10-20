@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ScrollText, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, ScrollText, Search } from "lucide-react";
+import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 
 interface AuditEntry {
   id: string;
@@ -9,14 +10,12 @@ interface AuditEntry {
   entityType: string | null;
   entityId: string | null;
   details: Record<string, unknown> | null;
-  ipAddress: string | null;
   createdAt: string;
   user: { id: string; name: string | null; email: string } | null;
 }
 
 interface Pagination {
   page: number;
-  limit: number;
   total: number;
   totalPages: number;
 }
@@ -26,99 +25,99 @@ const ENTITY_TYPES = [
   "KnowledgeEntry",
   "KnowledgeSource",
   "Questionnaire",
+  "InterviewSession",
   "Organization",
+  "OrganizationInvitation",
   "User",
 ];
 
+function actionTone(action: string) {
+  if (/delete|reject|remove|revoke/.test(action)) return "b-red";
+  if (/approve|verify|complete/.test(action)) return "b-teal";
+  if (/edit|update|regenerate/.test(action)) return "b-amber";
+  return "b-blue";
+}
+
+function fmt(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function details(d: Record<string, unknown> | null) {
+  if (!d) return "—";
+  return Object.entries(d)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : String(v)}`)
+    .join("  ");
+}
+
 export default function AuditPage() {
   const [logs, setLogs] = useState<AuditEntry[]>([]);
-  const [pagination, setPagination] = useState<Pagination>({
-    page: 1,
-    limit: 50,
-    total: 0,
-    totalPages: 0,
-  });
-  const [actionFilter, setActionFilter] = useState("");
-  const [entityFilter, setEntityFilter] = useState("");
+  const [pg, setPg] = useState<Pagination>({ page: 1, total: 0, totalPages: 0 });
+  const [page, setPage] = useState(1);
+  const [action, setAction] = useState("");
+  const [actionQuery, setActionQuery] = useState("");
+  const [entity, setEntity] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set("page", String(pagination.page));
-    params.set("limit", "50");
-    if (actionFilter) params.set("action", actionFilter);
-    if (entityFilter) params.set("entityType", entityFilter);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setActionQuery(action.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [action]);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams({ page: String(page), limit: "50" });
+    if (actionQuery) params.set("action", actionQuery);
+    if (entity) params.set("entityType", entity);
     try {
       const res = await fetch(`/api/audit-logs?${params}`);
       const json = await res.json();
       setLogs(json.data || []);
-      setPagination((p) => ({ ...p, ...json.pagination }));
+      setPg(json.pagination || { page: 1, total: 0, totalPages: 0 });
     } catch {
       setLogs([]);
     } finally {
       setLoading(false);
     }
-  }, [actionFilter, entityFilter, pagination.page]);
+  }, [page, actionQuery, entity]);
 
   useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
-
-  function handleSearch() {
-    setPagination((p) => ({ ...p, page: 1 }));
-  }
-
-  function formatAction(action: string) {
-    return action
-      .split(".")
-      .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-      .join(" → ");
-  }
-
-  function formatDate(iso: string) {
-    return new Date(iso).toLocaleString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
+    load();
+  }, [load]);
 
   return (
-    <div>
-      <div className="flex items-center gap-3 mb-6">
-        <ScrollText className="w-6 h-6 text-indigo-400" />
-        <h1 className="text-2xl font-bold text-white">Audit Trail</h1>
-        <span className="ml-auto text-sm text-slate-500">
-          {pagination.total} entries
-        </span>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Tools"
+        title="Audit trail"
+        sub="Every review decision and change to the knowledge base, questionnaires, settings and team."
+        actions={<span className="pill p-grey">{pg.total} entries</span>}
+      />
 
-      {/* Filters */}
-      <div className="flex gap-3 mb-6">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Filter by action..."
-            value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            className="w-full pl-9 pr-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm placeholder-slate-500"
-          />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+        <div className="relative sm:w-72">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-45" aria-hidden />
+          <input type="search" className="input !pl-10" placeholder="Filter by action, e.g. approve" aria-label="Filter by action" value={action} onChange={(e) => setAction(e.target.value)} />
         </div>
         <select
-          value={entityFilter}
+          className="input sm:!w-60"
+          aria-label="Filter by record type"
+          value={entity}
           onChange={(e) => {
-            setEntityFilter(e.target.value);
-            setPagination((p) => ({ ...p, page: 1 }));
+            setEntity(e.target.value);
+            setPage(1);
           }}
-          className="px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm"
         >
-          <option value="">All entity types</option>
+          <option value="">All record types</option>
           {ENTITY_TYPES.map((t) => (
             <option key={t} value={t}>
               {t}
@@ -127,115 +126,61 @@ export default function AuditPage() {
         </select>
       </div>
 
-      {/* Table */}
-      <div className="card-panel overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      {!loading && logs.length === 0 ? (
+        <EmptyState
+          icon={<ScrollText />}
+          title={actionQuery || entity ? "No matching entries" : "No activity yet"}
+          text="Approving answers, editing the knowledge base, exports and team changes are recorded here."
+        />
+      ) : (
+        <div className="card overflow-x-auto" aria-busy={loading}>
+          <table className="data-table">
             <thead>
-              <tr className="border-b border-slate-700/50">
-                <th className="text-left py-3 px-4 text-slate-400 font-medium">
-                  Time
-                </th>
-                <th className="text-left py-3 px-4 text-slate-400 font-medium">
-                  User
-                </th>
-                <th className="text-left py-3 px-4 text-slate-400 font-medium">
-                  Action
-                </th>
-                <th className="text-left py-3 px-4 text-slate-400 font-medium">
-                  Entity
-                </th>
-                <th className="text-left py-3 px-4 text-slate-400 font-medium">
-                  Details
-                </th>
+              <tr>
+                <th>Time</th>
+                <th>User</th>
+                <th>Action</th>
+                <th className="hidden md:table-cell">Record</th>
+                <th className="hidden lg:table-cell">Details</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-500">
-                    Loading...
+              {logs.map((l) => (
+                <tr key={l.id}>
+                  <td className="whitespace-nowrap font-mono text-xs text-ink-65">{fmt(l.createdAt)}</td>
+                  <td className="max-w-[160px] truncate">{l.user?.name || l.user?.email || "System"}</td>
+                  <td>
+                    <span className={`badge ${actionTone(l.action)}`}>{l.action}</span>
+                  </td>
+                  <td className="hidden font-mono text-xs text-ink-65 md:table-cell">
+                    {l.entityType}
+                    {l.entityId && <span className="text-ink-45"> #{l.entityId.slice(-8)}</span>}
+                  </td>
+                  <td className="hidden max-w-[320px] truncate font-mono text-xs text-ink-65 lg:table-cell" title={details(l.details)}>
+                    {details(l.details)}
                   </td>
                 </tr>
-              ) : logs.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-500">
-                    No audit entries found
-                  </td>
-                </tr>
-              ) : (
-                logs.map((log) => (
-                  <tr
-                    key={log.id}
-                    className="border-b border-slate-800/50 hover:bg-slate-800/30"
-                  >
-                    <td className="py-3 px-4 text-slate-400 whitespace-nowrap">
-                      {formatDate(log.createdAt)}
-                    </td>
-                    <td className="py-3 px-4 text-white">
-                      {log.user?.name || log.user?.email || "System"}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-indigo-500/15 text-indigo-400">
-                        {formatAction(log.action)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-slate-400">
-                      {log.entityType && (
-                        <span className="text-xs">
-                          {log.entityType}
-                          {log.entityId && (
-                            <span className="text-slate-600 ml-1">
-                              #{log.entityId.slice(0, 8)}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
-                      {log.details
-                        ? JSON.stringify(log.details).slice(0, 80)
-                        : "—"}
-                    </td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
+      )}
 
-      {/* Pagination */}
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-sm text-slate-500">
-            Page {pagination.page} of {pagination.totalPages}
+      {pg.totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-[13px] text-ink-65">
+          <span>
+            Page {pg.page} of {pg.totalPages}
           </span>
           <div className="flex gap-2">
-            <button
-              onClick={() =>
-                setPagination((p) => ({ ...p, page: Math.max(1, p.page - 1) }))
-              }
-              disabled={pagination.page <= 1}
-              className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-30"
-            >
-              <ChevronLeft className="w-4 h-4" />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPage((p) => p - 1)} disabled={page <= 1} aria-label="Previous page">
+              <ChevronLeft className="h-4 w-4" aria-hidden />
             </button>
-            <button
-              onClick={() =>
-                setPagination((p) => ({
-                  ...p,
-                  page: Math.min(p.totalPages, p.page + 1),
-                }))
-              }
-              disabled={pagination.page >= pagination.totalPages}
-              className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-30"
-            >
-              <ChevronRight className="w-4 h-4" />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPage((p) => p + 1)} disabled={page >= pg.totalPages} aria-label="Next page">
+              <ChevronRight className="h-4 w-4" aria-hidden />
             </button>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

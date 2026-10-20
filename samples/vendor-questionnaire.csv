@@ -1,0 +1,6 @@
+ID,Category,Question,Response
+1,Data security,"Is customer data encrypted at rest? If yes, state the algorithm.",
+2,Data security,Is all traffic between clients and your service encrypted in transit?,
+3,Identity,What are the minimum password requirements for user accounts?,
+4,Operations,"How often do you scan your systems for vulnerabilities, and how quickly are critical findings fixed?",
+5,Resilience,What are your RTO and RPO for critical systems?,

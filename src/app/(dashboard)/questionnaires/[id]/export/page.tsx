@@ -2,195 +2,192 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import {
-  Download,
-  ArrowLeft,
-  CheckCircle,
-  AlertCircle,
-  Loader2,
-} from "lucide-react";
-import { toast } from "sonner";
 import Link from "next/link";
+import { CheckCircle2, CircleAlert, Download, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { domainLabel, pct } from "@/lib/ui/labels";
 
-interface ExportPreview {
+interface Preview {
   name: string;
   totalQuestions: number;
   approvedCount: number;
   answeredCount: number;
   avgConfidence: number;
-  domainBreakdown: { domain: string; count: number; approved: number }[];
+  domains: { domain: string; count: number; approved: number }[];
+}
+
+interface ApiQuestion {
+  domain: string;
+  answers?: { confidence: number; status: string }[];
+}
+
+const FORMATS = [
+  { id: "xlsx", label: "Excel workbook", hint: "Question, answer, status, confidence and sources per row (.xlsx)" },
+  { id: "txt", label: "Text report", hint: "Readable report grouped by question, with cited sources (.txt)" },
+] as const;
+
+function fileNameFrom(res: Response, fallback: string) {
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  return /filename="([^"]+)"/.exec(cd)?.[1] ?? fallback;
 }
 
 export default function ExportPage() {
   const { id } = useParams<{ id: string }>();
-  const [preview, setPreview] = useState<ExportPreview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/questionnaires/${id}`)
-      .then((r) => r.json())
-      .then((data) => {
-        const domains: Record<string, { count: number; approved: number }> = {};
-        let totalConfidence = 0;
-        let answered = 0;
-
-        for (const q of data.questions || []) {
-          const d = q.domain;
-          if (!domains[d]) domains[d] = { count: 0, approved: 0 };
-          domains[d].count++;
-          if (q.answers?.[0]) {
-            answered++;
-            totalConfidence += q.answers[0].confidence;
-            if (q.answers[0].status === "APPROVED") domains[d].approved++;
-          }
+    fetch(`/api/questionnaires/${id}`).then(async (r) => {
+      if (!r.ok) return setMissing(true);
+      const data = await r.json();
+      const domains: Record<string, { count: number; approved: number }> = {};
+      let conf = 0;
+      let answered = 0;
+      for (const q of (data.questions || []) as ApiQuestion[]) {
+        const d = (domains[q.domain] ??= { count: 0, approved: 0 });
+        d.count++;
+        const a = q.answers?.[0];
+        if (a) {
+          answered++;
+          conf += a.confidence;
+          if (a.status === "APPROVED") d.approved++;
         }
-
-        setPreview({
-          name: data.name,
-          totalQuestions: data.totalQuestions,
-          approvedCount: data.approvedCount,
-          answeredCount: answered,
-          avgConfidence: answered > 0 ? totalConfidence / answered : 0,
-          domainBreakdown: Object.entries(domains).map(([domain, stats]) => ({
-            domain,
-            count: stats.count,
-            approved: stats.approved,
-          })),
-        });
-      })
-      .finally(() => setLoading(false));
+      }
+      setPreview({
+        name: data.name,
+        totalQuestions: data.totalQuestions,
+        approvedCount: data.approvedCount,
+        answeredCount: answered,
+        avgConfidence: answered ? conf / answered : 0,
+        domains: Object.entries(domains)
+          .map(([domain, s]) => ({ domain, ...s }))
+          .sort((a, b) => b.count - a.count),
+      });
+    });
   }, [id]);
 
-  async function handleExport() {
-    setExporting(true);
+  async function download(format: string) {
+    setExporting(format);
     try {
-      const res = await fetch(`/api/questionnaires/${id}/export`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error("Export failed");
+      const res = await fetch(`/api/questionnaires/${id}/export?format=${format}`, { method: "POST" });
+      if (!res.ok) throw new Error();
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${preview?.name || "export"}.xlsx`;
+      a.download = fileNameFrom(res, `${preview?.name || "export"}.${format}`);
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success("Export downloaded");
     } catch {
       toast.error("Export failed");
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   }
 
-  if (loading)
-    return <div className="text-slate-400 text-center py-12">Loading...</div>;
-  if (!preview)
+  if (missing) {
     return (
-      <div className="text-red-400 text-center py-12">
-        Questionnaire not found
-      </div>
+      <EmptyState title="Questionnaire not found">
+        <Link href="/questionnaires" className="btn btn-primary btn-sm">
+          All questionnaires
+        </Link>
+      </EmptyState>
     );
+  }
+  if (!preview) return <LoadingBlocks rows={2} />;
 
+  const allAnswered = preview.answeredCount === preview.totalQuestions;
   const allApproved = preview.approvedCount === preview.totalQuestions;
-  const approvalPct =
-    preview.totalQuestions > 0
-      ? Math.round((preview.approvedCount / preview.totalQuestions) * 100)
-      : 0;
+  const check = (ok: boolean) =>
+    ok ? (
+      <CheckCircle2 className="h-4 w-4 shrink-0 text-teal" aria-label="done" />
+    ) : (
+      <CircleAlert className="h-4 w-4 shrink-0 text-amber" aria-label="incomplete" />
+    );
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href={`/questionnaires/${id}`}
-        className="text-sm text-slate-400 hover:text-white flex items-center gap-1 mb-4"
-      >
-        <ArrowLeft className="w-4 h-4" /> Back to Review
-      </Link>
+      <PageHeader
+        eyebrow={
+          <>
+            <Link href="/questionnaires" className="hover:text-accent">
+              Questionnaires
+            </Link>{" "}
+            / <Link href={`/questionnaires/${id}`} className="hover:text-accent">{preview.name}</Link>
+          </>
+        }
+        title="Export"
+        actions={
+          <Link href={`/questionnaires/${id}`} className="btn btn-ghost btn-sm">
+            Back to review
+          </Link>
+        }
+      />
 
-      <h1 className="text-2xl font-bold text-white mb-6">
-        Export: {preview.name}
-      </h1>
+      <div className="grid gap-4 md:grid-cols-2">
+        <section className="card p-5">
+          <h2 className="mb-3">Readiness</h2>
+          <ul className="grid gap-2.5 text-[13px]">
+            <li className="flex items-center gap-2">
+              {check(allAnswered)} {preview.answeredCount}/{preview.totalQuestions} questions answered
+            </li>
+            <li className="flex items-center gap-2">
+              {check(allApproved)} {preview.approvedCount}/{preview.totalQuestions} answers approved (
+              {pct(preview.approvedCount, preview.totalQuestions)}%)
+            </li>
+            <li className="flex items-center gap-2 text-ink-65">
+              Average confidence <b className="font-mono text-ink">{preview.avgConfidence.toFixed(2)}</b>
+            </li>
+          </ul>
+          {!allApproved && (
+            <p className="alert alert-warn mt-4">
+              Answers that are not approved are still exported, with their status in the file.
+            </p>
+          )}
+        </section>
 
-      {/* Readiness check */}
-      <div className="card-panel mb-6">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Export Readiness
-        </h2>
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            {preview.answeredCount === preview.totalQuestions ? (
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-amber-400" />
-            )}
-            <span className="text-sm text-slate-300">
-              {preview.answeredCount}/{preview.totalQuestions} questions
-              answered
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {allApproved ? (
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-amber-400" />
-            )}
-            <span className="text-sm text-slate-300">
-              {preview.approvedCount}/{preview.totalQuestions} answers approved
-              ({approvalPct}%)
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-emerald-400" />
-            <span className="text-sm text-slate-300">
-              Average confidence: {Math.round(preview.avgConfidence * 100)}%
-            </span>
-          </div>
-        </div>
+        <section className="card p-5">
+          <h2 className="mb-3">By domain</h2>
+          <ul className="grid gap-2 text-[13px]">
+            {preview.domains.map((d) => (
+              <li key={d.domain} className="flex items-center justify-between gap-3">
+                <span className="truncate">{domainLabel(d.domain)}</span>
+                <span className="font-mono text-xs text-ink-65">
+                  {d.approved}/{d.count} approved
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
 
-      {/* Domain breakdown */}
-      <div className="card-panel mb-6">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Domain Breakdown
-        </h2>
-        <div className="space-y-2">
-          {preview.domainBreakdown.map((d) => (
-            <div
-              key={d.domain}
-              className="flex items-center justify-between text-sm"
+      <section className="card mt-4 p-5">
+        <h2 className="mb-3">Download</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {FORMATS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => download(f.id)}
+              disabled={!!exporting}
+              className="flex items-start gap-3 rounded-2xl border border-g-line bg-g-bg p-4 text-left hover:border-accent disabled:opacity-60"
             >
-              <span className="text-slate-300">
-                {d.domain.replace(/_/g, " ")}
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+                {exporting === f.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
               </span>
-              <span className="text-slate-400">
-                {d.approved}/{d.count} approved
+              <span>
+                <b className="block">{f.label}</b>
+                <small className="text-xs text-ink-65">{f.hint}</small>
               </span>
-            </div>
+            </button>
           ))}
         </div>
-      </div>
-
-      {/* Export button */}
-      <button
-        onClick={handleExport}
-        disabled={exporting}
-        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2"
-      >
-        {exporting ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
-        ) : (
-          <Download className="w-5 h-5" />
-        )}
-        Export to Excel
-      </button>
-
-      {!allApproved && (
-        <p className="text-xs text-amber-400 text-center mt-2">
-          Some answers are not yet approved. They will still be included in the
-          export.
-        </p>
-      )}
+      </section>
     </div>
   );
 }

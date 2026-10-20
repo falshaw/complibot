@@ -1,0 +1,5 @@
+Question,Answer
+Do you enforce multi-factor authentication for administrative access?,"Yes. MFA is required for all administrative and remote access, using an authenticator app or hardware security key. SMS codes are not accepted."
+How is physical access to your offices controlled?,"Offices use badge access with visitor sign-in and escort. Production systems run in third-party data centres with SOC 2 audited physical controls."
+How are changes to production systems approved?,"All production changes go through a ticketed change process with peer review and approval. Emergency changes are reviewed within one business day."
+How long do you keep personal data?,"Personal data is kept only as long as the contract requires and is deleted within 30 days of termination, unless the law requires longer retention."

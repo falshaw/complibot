@@ -7,9 +7,8 @@ node_modules
 .env.*
 .env.local
 .env.*.local
-# Patterns are matched against the WHOLE relative path — the root-anchored
-# entries above do NOT cover deploy/.env.prod, which holds live Stripe keys
-# (audit 2026-08-09 P2).
+# Patterns are matched against the WHOLE relative path: the root-anchored
+# entries above do not cover nested env files such as deploy/.env.prod.
 **/.env
 **/.env.*
 !**/.env.example
