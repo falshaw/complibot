@@ -60,7 +60,7 @@ export default function QuestionnaireUploadPage() {
           <input
             type="file"
             className="input"
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.csv"
             onChange={(e) => {
               const f = e.target.files?.[0] ?? null;
               setFile(f);
@@ -69,7 +69,7 @@ export default function QuestionnaireUploadPage() {
             required
           />
           <span className="text-xs text-ink-65">
-            {file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : ".xlsx, .xls or .csv, up to 10 MB"}
+            {file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : ".xlsx or .csv, up to 10 MB"}
           </span>
         </label>
 

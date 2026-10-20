@@ -60,16 +60,18 @@ export const POST = apiHandler(
     }
 
     const ext = file.name.split(".").pop()?.toLowerCase();
-    if (!["xlsx", "xls", "csv", "pdf"].includes(ext || "")) {
+    // ExcelJS reads .xlsx only (not the old binary .xls); PDF and Word
+    // documents are not parsed at all.
+    if (!["xlsx", "csv"].includes(ext || "")) {
       return NextResponse.json(
-        { error: "Unsupported file type" },
+        { error: "Only Excel (.xlsx) and CSV files are supported" },
         { status: 400 },
       );
     }
 
-    if (file.size > 20 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
-        { error: "File size must be under 20MB" },
+        { error: "File size must be under 10MB" },
         { status: 400 },
       );
     }
@@ -109,7 +111,7 @@ export const POST = apiHandler(
     });
 
     // Process in background for Excel/CSV with answer columns
-    if (["xlsx", "xls", "csv"].includes(ext!) && columnMapping) {
+    if (columnMapping) {
       let mapping;
       try {
         const parsed = JSON.parse(columnMapping);

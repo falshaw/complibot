@@ -66,9 +66,10 @@ export const POST = apiHandler(
 
     // Validate file type
     const ext = file.name.split(".").pop()?.toLowerCase();
-    if (!["xlsx", "xls", "csv"].includes(ext || "")) {
+    // ExcelJS reads .xlsx only, not the old binary .xls format.
+    if (!["xlsx", "csv"].includes(ext || "")) {
       return NextResponse.json(
-        { error: "Only Excel (.xlsx/.xls) and CSV files are supported" },
+        { error: "Only Excel (.xlsx) and CSV files are supported" },
         { status: 400 },
       );
     }
