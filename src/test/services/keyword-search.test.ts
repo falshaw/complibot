@@ -158,29 +158,50 @@ describe("keywordSearch / hybridSearch (embeddings off)", () => {
 });
 
 describe("generateAnswer", () => {
-  it("puts the top-scored encryption entries into the LLM context", async () => {
-    chat.mockResolvedValue({
-      choices: [{ message: { content: "Yes. Data at rest is encrypted with AES-256." } }],
-    });
+  const question = {
+    id: "q-1",
+    questionText: QUESTION,
+    questionType: "YES_NO" as const,
+    domain: "DATA_PROTECTION" as const,
+  };
+  const reply = (content: string) => chat.mockResolvedValue({ choices: [{ message: { content } }] });
 
-    const result = await generateAnswer("q-1", "org-1", {
-      question: {
-        id: "q-1",
-        questionText: QUESTION,
-        questionType: "YES_NO",
-        domain: "DATA_PROTECTION",
-      },
-      domainEntryCount: 0,
-    });
+  it("shows the model only the relevant entries and asks it to declare its sources", async () => {
+    reply("Yes. Data at rest is encrypted with AES-256.\nSources: 1");
 
-    const userMessage = chat.mock.calls[0][0].messages[1].content as string;
-    expect(userMessage).not.toContain("No relevant context found");
-    const source1 = userMessage.indexOf("[Source 1]");
-    const source2 = userMessage.indexOf("[Source 2]");
-    expect(userMessage.slice(source1, source2)).toContain(AT_REST.answer);
-    expect(userMessage).toContain(IN_TRANSIT.answer);
+    await generateAnswer("q-1", "org-1", { question });
 
-    expect(result.sourceIds[0].id).toBe(AT_REST.id);
-    expect(result.confidence).toBeGreaterThan(0.1);
+    const [system, user] = chat.mock.calls[0][0].messages;
+    expect(system.content).toContain("Sources: none");
+    expect(user.content).toContain("[Source 1]");
+    expect(user.content).toContain(AT_REST.answer);
+    // Below the relevance cut-off: never shown, so never cited
+    const unrelated = ENTRIES.filter((e) => e.domain !== "ENCRYPTION");
+    for (const e of unrelated) expect(user.content).not.toContain(e.answer);
+  });
+
+  it("cites only the declared source and scores a grounded draft above the threshold", async () => {
+    reply("Yes. All data at rest is encrypted using AES-256 encryption, with keys in a KMS.\nSources: 1");
+
+    const result = await generateAnswer("q-1", "org-1", { question });
+
+    expect(result.content).toBe("Yes. All data at rest is encrypted using AES-256 encryption, with keys in a KMS.");
+    expect(result.sourceIds.map((s) => s.id)).toEqual([AT_REST.id]);
+    expect(result.sourceIds[0]).toMatchObject({ rank: 0 });
+    expect(result.confidence).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it("cites nothing and scores low when the knowledge base does not cover the question", async () => {
+    reply("The knowledge base does not cover it.\nSources: none");
+
+    const result = await generateAnswer("q-1", "org-1", { question });
+
+    expect(result.sourceIds).toEqual([]);
+    expect(result.confidence).toBeLessThan(0.2);
+  });
+
+  it("fails instead of storing an empty draft", async () => {
+    reply("   ");
+    await expect(generateAnswer("q-1", "org-1", { question })).rejects.toThrow(/empty answer/);
   });
 });

@@ -10,6 +10,10 @@
  * filters entries out, because an LLM classifier can file "Do you encrypt
  * customer data at rest?" under DATA_PROTECTION while the knowledge base has
  * the answer under ENCRYPTION.
+ *
+ * `similarity` on every result is a relevance on one 0..1 scale for both
+ * search kinds (see relevance.ts), so results can be compared, cut off and
+ * shown side by side.
  */
 
 import prisma from "@/lib/prisma";
@@ -20,6 +24,7 @@ import {
   semanticSearch,
 } from "./EmbeddingService";
 import { extractSearchTerms, rankEntries } from "./keywordScoring";
+import { keywordRelevance, semanticRelevance } from "./relevance";
 import { logger } from "@/lib/logger";
 import type { SecurityDomain } from "@prisma/client";
 
@@ -28,6 +33,7 @@ export interface SearchResult {
   question: string;
   answer: string;
   domain: string;
+  /** Relevance 0..1, comparable between semantic and keyword results. */
   similarity: number;
   keywords: string[];
   source: "semantic" | "keyword" | "hybrid";
@@ -76,7 +82,7 @@ export async function keywordSearch(
       question: entry.question,
       answer: entry.answer,
       domain: entry.domain,
-      similarity: score,
+      similarity: keywordRelevance(score),
       keywords: entry.keywords,
       source: "keyword" as const,
     }),
@@ -86,7 +92,7 @@ export async function keywordSearch(
 /**
  * Reciprocal Rank Fusion to merge two ranked lists.
  * Order: RRF score = sum(1 / (k + rank)). The reported similarity stays the
- * best underlying similarity (0..1) so confidence scoring is not distorted by
+ * best underlying relevance (0..1) so confidence scoring is not distorted by
  * the tiny raw RRF values.
  */
 export function reciprocalRankFusion(
@@ -146,7 +152,7 @@ export async function hybridSearch(
         );
         return results.map((r) => ({
           ...r,
-          similarity: Number(r.similarity),
+          similarity: semanticRelevance(Number(r.similarity)),
           keywords: [] as string[],
           source: "semantic" as const,
         }));
@@ -161,8 +167,16 @@ export async function hybridSearch(
     keywordSearch(organizationId, query, limit * 2, domain),
   ]);
 
-  if (semanticResults.length === 0) return keywordResults.slice(0, limit);
-  if (keywordResults.length === 0) return semanticResults.slice(0, limit);
+  const merged =
+    semanticResults.length === 0
+      ? keywordResults
+      : keywordResults.length === 0
+        ? semanticResults
+        : reciprocalRankFusion(semanticResults, keywordResults);
 
-  return reciprocalRankFusion(semanticResults, keywordResults).slice(0, limit);
+  // Best relevance first; Array.prototype.sort is stable, so ties keep the
+  // fused (RRF) order.
+  return [...merged]
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, limit);
 }

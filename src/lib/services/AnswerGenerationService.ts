@@ -1,73 +1,55 @@
 /**
  * CompliBot - Answer Generation Service
- * Retrieval Augmented Generation: retrieve the best-scoring knowledge-base
- * entries for a question, then ask the configured LLM to draft the answer.
+ * Retrieval Augmented Generation: retrieve the most relevant knowledge-base
+ * entries for a question, drop the weak ones, ask the configured LLM to draft
+ * the answer from the rest, and cite only the entries the draft used.
  */
 
 import prisma from "@/lib/prisma";
 import { hybridSearch } from "./SearchService";
+import { applyRelevanceCutoff } from "./relevance";
+import { assessAnswer, type QualitySignals } from "./answerQuality";
 import { logger } from "@/lib/logger";
 import { sanitizeForPrompt } from "@/lib/sanitize";
 import { ollamaChatWithBreaker, OLLAMA_MODEL } from "@/lib/ollama";
 import type { QuestionType, SecurityDomain } from "@prisma/client";
 
-/** Number of top-scored knowledge entries passed to the LLM as context. */
+export { detectQuestionType } from "./questionType";
+
+/** At most this many entries are retrieved; the relevance cut-off keeps fewer. */
 const MAX_CONTEXT_ENTRIES = 5;
 
 const PROMPT_TEMPLATES: Record<string, string> = {
-  YES_NO: `You are answering a security questionnaire. Based on the company's knowledge base context below, answer this yes/no question.
-If the context supports it, answer "Yes" and provide a brief justification (1-2 sentences).
-If not supported, answer "No" or "N/A" with explanation.
-Be definitive and concise.`,
+  YES_NO: `You are answering a yes/no question in a security questionnaire for the company.
+Start with "Yes" or "No" and give a one or two sentence justification from the sources.`,
 
-  FREE_TEXT: `You are answering a security questionnaire. Based on the company's knowledge base context below, provide a professional, accurate answer.
-Write 2-4 sentences. Be specific and reference actual practices. Don't say "we" — use the company's perspective implicitly.
-If context is insufficient, provide the best answer possible and note what additional information may be needed.`,
+  FREE_TEXT: `You are answering a security questionnaire for the company.
+Write 2-4 sentences that state the actual practice, with the specifics the sources give (frequencies, time limits, standards, tools). Do not say "we"; write from the company's perspective.`,
 
-  MULTIPLE_CHOICE: `You are answering a security questionnaire multiple choice question. Based on the company's knowledge base context, select the most appropriate option and explain briefly why.`,
+  MULTIPLE_CHOICE: `You are answering a multiple choice question in a security questionnaire for the company.
+Name the option or options the sources support and explain the choice in one sentence.`,
 
-  EVIDENCE: `You are answering a security questionnaire that requires evidence or documentation references.
-Based on the context, describe the relevant policies, procedures, or controls. Reference specific document names where possible.
-If evidence isn't directly available, describe what documentation would exist and where it would be maintained.`,
+  EVIDENCE: `You are answering a security questionnaire question that asks for evidence or documentation.
+Name the policies, reports, certifications or records the sources mention that would serve as evidence, and what each covers.`,
 
-  DATE: `Based on the company's security knowledge base, provide the relevant date or timeframe requested. If the exact date isn't available, provide the most reasonable estimate based on context.`,
+  DATE: `You are answering a security questionnaire question that asks for a date or a point in time.
+Give the date or time the sources state, with one sentence of context.`,
 
-  NUMERIC: `Based on the company's security knowledge base, provide the relevant numeric value requested. If the exact number isn't available, provide a reasonable estimate or range based on context.`,
+  NUMERIC: `You are answering a security questionnaire question that asks for a number.
+Give the number or range the sources state, with one sentence of context.`,
 };
 
-/**
- * Calculate confidence score for a generated answer
- */
-function calculateConfidence(
-  similarities: number[],
-  questionType: QuestionType,
-  domainEntryCount: number,
-): number {
-  if (similarities.length === 0) return 0.1;
-
-  // Weighted average of top-K similarities
-  const weights = [0.4, 0.25, 0.15, 0.1, 0.1];
-  let weightedSum = 0;
-  let totalWeight = 0;
-  for (let i = 0; i < Math.min(similarities.length, weights.length); i++) {
-    weightedSum += similarities[i] * weights[i];
-    totalWeight += weights[i];
-  }
-  let base = weightedSum / totalWeight;
-
-  // Exact match bonus
-  if (similarities[0] > 0.92) base += 0.15;
-
-  // Domain coverage penalty
-  if (domainEntryCount < 3) base *= 0.7;
-  else if (domainEntryCount < 5) base *= 0.85;
-
-  // Question type adjustments
-  if (questionType === "YES_NO") base += 0.05;
-  if (questionType === "EVIDENCE") base *= 0.8;
-
-  return Math.max(0, Math.min(1, base));
-}
+/** Appended to every prompt: stay inside the sources and declare which were used. */
+export const SOURCE_RULES = `
+Rules:
+- Use only facts from the numbered knowledge-base sources. Do not invent products, numbers, dates or certifications.
+- If the sources do not answer the question, write that the knowledge base does not cover it, and nothing else.
+- If they answer only part of it, answer that part and write which part the knowledge base does not cover.
+- Do not put source numbers in the answer text.
+- End with one last line in exactly this form, listing only the sources the answer uses:
+Sources: 1, 3
+or, if no source was used:
+Sources: none`;
 
 /**
  * Classify question into a security domain with the configured LLM
@@ -124,34 +106,6 @@ Respond with ONLY the domain name, nothing else.`,
 }
 
 /**
- * Detect question type
- */
-export async function detectQuestionType(
-  questionText: string,
-): Promise<QuestionType> {
-  const lower = questionText.toLowerCase();
-  if (
-    /^(do you|does your|is your|are you|have you|can you|will you|is there)\b/i.test(
-      lower,
-    )
-  )
-    return "YES_NO";
-  if (/\b(how many|number of|count|quantity|percentage|rate)\b/i.test(lower))
-    return "NUMERIC";
-  if (/\b(when|date|last time|how often|frequency)\b/i.test(lower))
-    return "DATE";
-  if (
-    /\b(evidence|documentation|proof|certificate|attestation|report)\b/i.test(
-      lower,
-    )
-  )
-    return "EVIDENCE";
-  if (/\b(select|choose|which of the following|check all)\b/i.test(lower))
-    return "MULTIPLE_CHOICE";
-  return "FREE_TEXT";
-}
-
-/**
  * Shape of a prefetched question row — matches what Prisma returns from
  * Question.findMany / findUniqueOrThrow for the fields we actually use.
  */
@@ -192,113 +146,89 @@ async function mapWithConcurrency<T, R>(
 /**
  * Generate an AI answer for a single question using RAG.
  *
- * Accepts a prefetched `question` object to avoid a redundant DB round-trip
- * when called in a batch (e.g. from generateQuestionnaireAnswers).
- * Also accepts a prefetched `domainEntryCount` for the same reason.
+ * Retrieval returns up to MAX_CONTEXT_ENTRIES entries; the relevance cut-off
+ * (relevance.ts) drops the weak ones before the model sees them, and only the
+ * entries the draft declares (or visibly uses) are returned as citations.
  *
- * The public overload that takes only (questionId, organizationId) is kept
- * for callers that invoke this function in isolation.
+ * `prefetched.question` skips the DB read when called in a batch.
  */
 export async function generateAnswer(
   questionId: string,
   organizationId: string,
-  prefetched?: {
-    question: QuestionData;
-    domainEntryCount: number;
-  },
+  prefetched?: { question: QuestionData },
 ): Promise<{
   content: string;
   confidence: number;
-  sourceIds: Array<{ id: string; similarity: number }>;
+  sourceIds: Array<{ id: string; similarity: number; rank: number }>;
+  signals: QualitySignals;
 }> {
   logger.ai.generate(questionId, "start");
 
-  // Use prefetched question data when available; fall back to DB fetch for
-  // standalone calls (e.g. regenerate-single-answer endpoint).
   const question: QuestionData =
     prefetched?.question ??
     (await prisma.question.findUniqueOrThrow({ where: { id: questionId } }));
 
-  // Retrieve the top-scored knowledge entries (best first). The domain only
-  // boosts matching entries; it does not filter.
-  const searchResults = await hybridSearch(
+  // Best first. The domain only boosts matching entries; it does not filter.
+  const retrieved = await hybridSearch(
     organizationId,
     question.questionText,
     MAX_CONTEXT_ENTRIES,
     question.domain,
   );
+  const context = applyRelevanceCutoff(retrieved);
 
-  // Use prefetched domain entry count when available; fall back to DB query.
-  const domainEntryCount =
-    prefetched?.domainEntryCount ??
-    (await prisma.knowledgeEntry.count({
-      where: { organizationId, domain: question.domain },
-    }));
-
-  // Build context from search results
-  const context =
-    searchResults.length > 0
-      ? searchResults
+  const contextText =
+    context.length > 0
+      ? context
           .map(
             (r, i) =>
               `[Source ${i + 1}] (${r.domain})\nQ: ${r.question}\nA: ${r.answer}`,
           )
           .join("\n\n")
-      : "No relevant context found in the knowledge base.";
+      : "No relevant entries were found in the knowledge base.";
 
-  // Select prompt template
   const promptTemplate =
     PROMPT_TEMPLATES[question.questionType] || PROMPT_TEMPLATES.FREE_TEXT;
 
   const response = await ollamaChatWithBreaker({
     model: OLLAMA_MODEL,
     messages: [
-      { role: "system", content: promptTemplate },
+      { role: "system", content: promptTemplate + "\n" + SOURCE_RULES },
       {
         role: "user",
-        content: `## Knowledge Base Context:\n${context}\n\n## Question:\n${sanitizeForPrompt(question.questionText, 2000)}`,
+        content: `## Knowledge base sources:\n${contextText}\n\n## Question:\n${sanitizeForPrompt(question.questionText, 2000)}`,
       },
     ],
     temperature: 0.2,
     max_tokens: 500,
   });
 
-  const content =
-    response.choices[0]?.message?.content?.trim() ||
-    "Unable to generate answer.";
-  const similarities = searchResults.map((r) => r.similarity);
-  const confidence = calculateConfidence(
-    similarities,
-    question.questionType,
-    domainEntryCount,
+  const raw = response.choices[0]?.message?.content?.trim();
+  if (!raw) throw new Error("The model returned an empty answer");
+
+  const { content, cited, confidence, signals } = assessAnswer(
+    question.questionText,
+    raw,
+    context,
   );
-  const sourceIds = searchResults.map((r, i) => ({
-    id: r.id,
-    similarity: r.similarity,
-    rank: i,
-  }));
+  if (!content) throw new Error("The model returned only a sources line");
+
+  const sourceIds = cited
+    .map((i) => context[i])
+    .sort((a, b) => b.similarity - a.similarity)
+    .map((r, rank) => ({ id: r.id, similarity: r.similarity, rank }));
 
   logger.ai.generate(questionId, "success", {
     confidence,
-    sourceCount: sourceIds.length,
+    retrieved: retrieved.length,
+    context: context.length,
+    cited: sourceIds.length,
+    ...signals,
   });
 
-  return { content, confidence, sourceIds };
+  return { content, confidence, sourceIds, signals };
 }
 
-/**
- * Generate answers for all questions in a questionnaire.
- *
- * Optimisations vs the original serial loop:
- *   1. All questions are already fetched by the outer findMany — we pass the
- *      question data directly into generateAnswer to skip N redundant
- *      findUniqueOrThrow calls.
- *   2. Domain entry counts are prefetched in a single groupBy query instead
- *      of one COUNT per question.
- *   3. Answer generation calls run with bounded concurrency (see
- *      generationConcurrency) via mapWithConcurrency — serial DB writes still happen per
- *      answer to preserve atomicity, but LLM calls and hybridSearch overlap.
- */
 /**
  * How many answers to draft in parallel. LLM_CONCURRENCY overrides; otherwise
  * 1 for Ollama (one local model) and 5 for the HTTP bridge.
@@ -311,6 +241,12 @@ export function generationConcurrency(
   return (env.LLM_PROVIDER ?? "ollama").toLowerCase() === "claude" ? 5 : 1;
 }
 
+/**
+ * Generate answers for every question of a questionnaire that has no draft
+ * yet. Answers are drafted with bounded concurrency (generationConcurrency);
+ * each draft is written as soon as it is ready, so the review page can show
+ * progress while the run continues.
+ */
 export async function generateQuestionnaireAnswers(
   questionnaireId: string,
   organizationId: string,
@@ -340,32 +276,17 @@ export async function generateQuestionnaireAnswers(
       orderBy: { rowIndex: "asc" },
     });
 
-    // Batch-prefetch per-domain knowledge entry counts in a single query.
-    // groupBy returns one row per distinct domain value for this org.
-    const domainCountRows = await prisma.knowledgeEntry.groupBy({
-      by: ["domain"],
-      where: { organizationId },
-      _count: { id: true },
-    });
-    const domainCountMap = new Map<SecurityDomain, number>(
-      domainCountRows.map((r) => [r.domain, r._count.id]),
-    );
-
     // Bounded concurrency. A local Ollama model answers one request at a time
     // anyway; queueing several only makes the later ones wait (and time out)
     // and adds memory pressure, so the default there is 1.
     const CONCURRENCY = generationConcurrency();
 
-    // We need the DB writes (answer.create, answerSource.createMany) to be
-    // accounted correctly even when tasks overlap, so we use a shared counter
-    // updated atomically after each task resolves.
     await mapWithConcurrency(questions, CONCURRENCY, async (question) => {
       try {
-        const domainEntryCount = domainCountMap.get(question.domain) ?? 0;
         const { content, confidence, sourceIds } = await generateAnswer(
           question.id,
           organizationId,
-          { question, domainEntryCount },
+          { question },
         );
 
         const answer = await prisma.answer.create({
@@ -374,12 +295,9 @@ export async function generateQuestionnaireAnswers(
             content,
             confidence,
             aiGenerated: true,
-            status:
-              confidence >= threshold
-                ? "PENDING"
-                : confidence >= threshold * 0.625
-                  ? "FLAGGED"
-                  : "FLAGGED",
+            // Below the organization's threshold the draft is flagged for a
+            // closer look; above it, it waits for normal review.
+            status: confidence >= threshold ? "PENDING" : "FLAGGED",
           },
         });
 
@@ -390,7 +308,7 @@ export async function generateQuestionnaireAnswers(
               answerId: answer.id,
               knowledgeEntryId: s.id,
               similarity: s.similarity,
-              rank: sourceIds.indexOf(s),
+              rank: s.rank,
             })),
           });
         }

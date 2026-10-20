@@ -97,7 +97,8 @@ export function extractSearchTerms(query: string): string[] {
   return Array.from(new Set(terms));
 }
 
-function stemSet(text: string): Set<string> {
+/** Every word of `text`, stemmed (stopwords kept: used for membership tests). */
+export function stemSet(text: string): Set<string> {
   return new Set(tokenize(text).map(stem));
 }
 
