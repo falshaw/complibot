@@ -17,7 +17,9 @@ const ALLOWED_TYPES = [
   "application/vnd.ms-excel",
   "text/csv",
 ];
-const ALLOWED_EXTENSIONS = [".xlsx", ".xls", ".csv"];
+// .xlsx only: ExcelJS cannot read the old binary .xls format. The
+// application/vnd.ms-excel MIME type stays, as Windows reports CSV files with it.
+const ALLOWED_EXTENSIONS = [".xlsx", ".csv"];
 
 /**
  * POST /api/questionnaires/bulk-upload

@@ -61,12 +61,12 @@ export default function KnowledgeUploadPage() {
           <input
             type="file"
             className="input"
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.csv"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             required
           />
           <span className="text-xs text-ink-65">
-            {file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : ".xlsx, .xls or .csv, up to 10 MB"}
+            {file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : ".xlsx or .csv, up to 10 MB"}
           </span>
         </label>
 
