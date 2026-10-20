@@ -15,8 +15,7 @@
 #
 # ⚠️ Not yet validated on a live server — test on a staging box first.
 #    After the first `up`, pull the models into the bundled Ollama, e.g.:
-#       docker exec complibot-ollama ollama pull qwen2.5:7b
-#       docker exec complibot-ollama ollama pull nomic-embed-text
+#       docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml #         exec complibot-ollama ollama pull qwen2.5:7b
 # =============================================================================
 
 services:
@@ -25,6 +24,10 @@ services:
 
   complibot-redis:
     restart: unless-stopped
+
+  complibot-init:
+    environment:
+      OLLAMA_HOST: http://complibot-ollama:11434
 
   complibot-app:
     restart: unless-stopped
@@ -45,8 +48,6 @@ services:
 
   complibot-ollama:
     image: ollama/ollama:0.32.14@sha256:9d30908e41144b1f1da89b9d8e33c07e4aeb43ff41a8660241b1686e2cc330ad # bumped 2026-06-13 (0.5.7 had CVE-2026-7482 "Bleeding Llama")
-    container_name: complibot-ollama
-    hostname: complibot-ollama
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -61,9 +62,6 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
-    networks:
-      complibot-network:
-        ipv4_address: 172.38.0.13
     deploy:
       resources:
         limits:
@@ -78,8 +76,6 @@ services:
 
   caddy:
     image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 # pinned + digest (2026-06-13)
-    container_name: complibot-caddy
-    hostname: complibot-caddy
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -104,9 +100,6 @@ services:
     depends_on:
       complibot-app:
         condition: service_healthy
-    networks:
-      complibot-network:
-        ipv4_address: 172.38.0.14
     deploy:
       resources:
         limits:

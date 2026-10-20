@@ -199,8 +199,10 @@ model KnowledgeEntry {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  // pgvector embedding column (vector(768), nomic-embed-text) is added via raw SQL — see README
-  // Prisma doesn't natively support vector type, so we manage it via raw queries
+  // Optional pgvector embedding (768 dims, nomic-embed-text). Read and written
+  // with raw SQL in EmbeddingService; the vector extension and HNSW index are
+  // created by the init migration.
+  embedding      Unsupported("vector(768)")?
 
   organization    Organization     @relation(fields: [organizationId], references: [id])
   source          KnowledgeSource? @relation(fields: [sourceId], references: [id])

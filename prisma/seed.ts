@@ -29,9 +29,18 @@ async function main() {
     where: { email: "admin@demo.com" },
     select: { id: true },
   });
+  // The login form requires >= 12 characters incl. one special character.
   const adminPassword =
     process.env.SEED_ADMIN_PASSWORD ||
-    crypto.randomBytes(16).toString("base64url");
+    `Demo-${crypto.randomBytes(9).toString("hex")}!`;
+  if (
+    adminPassword.length < 12 ||
+    !/[!@#$%^&*()_+\-=\[\]{}|;':",.<>?\/\\]/.test(adminPassword)
+  ) {
+    throw new Error(
+      "SEED_ADMIN_PASSWORD must be at least 12 characters and contain a special character (login rule)",
+    );
+  }
   if (!adminExists) {
     console.log(
       `Demo users admin@demo.com / reviewer@demo.com created, password: ${adminPassword}`,

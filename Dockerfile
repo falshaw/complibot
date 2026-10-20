@@ -4,12 +4,23 @@
 FROM node:24.19-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS base
 RUN apk upgrade --no-cache
 
-# Dependencies stage
+# Dependencies stage (postinstall runs `prisma generate`, so the schema and
+# config must be present before npm ci)
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* prisma.config.ts ./
+COPY prisma ./prisma
 RUN npm ci
+
+# One-shot init: apply migrations, then seed demo data (idempotent).
+# Used by the complibot-init service in docker-compose.yml.
+FROM deps AS init
+COPY tsconfig.json ./
+COPY src/lib/demo-knowledge.ts ./src/lib/demo-knowledge.ts
+ENV NODE_ENV=production
+USER node
+CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts"]
 
 # Builder stage
 FROM base AS builder
