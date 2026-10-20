@@ -74,8 +74,10 @@ export function DeleteQuestionnaireButton({
         <p>
           <b className="text-ink">{q.name}</b> will be removed with its {q.totalQuestions}{" "}
           {q.totalQuestions === 1 ? "question" : "questions"}
-          {q.answeredCount > 0 ? `, ${q.answeredCount} drafted ${q.answeredCount === 1 ? "answer" : "answers"} and their review decisions` : ""}{" "}
-          and its export history. The knowledge base is not changed. This cannot be undone.
+          {q.answeredCount > 0
+            ? `, ${q.answeredCount} drafted ${q.answeredCount === 1 ? "answer" : "answers"} (with review decisions)`
+            : ""}{" "}
+          and export history. The knowledge base is not changed. This cannot be undone.
         </p>
       </ConfirmDialog>
     </>

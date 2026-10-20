@@ -1,6 +1,8 @@
 /**
  * CompliBot - Join with an invitation link (public, no session)
- * GET  /api/invite?token=...  what the link is for (email, organization, role)
+ * GET  /api/invite?token=...  what the link is for (email, organization, role);
+ *                              always 200, with valid:false and the reason for a
+ *                              bad link (the join page shows it; no console error)
  * POST /api/invite            { token, name?, password } creates the account
  *
  * The token is single-use: the invitation is claimed with a conditional
@@ -44,8 +46,12 @@ export const GET = apiHandler(
   async ({ req }) => {
     const invitation = await findInvitation(req.nextUrl.searchParams.get("token"));
     const problem = invitationProblem(invitation);
-    if (problem || !invitation) return problemResponse(problem ?? "invalid");
+    if (problem || !invitation) {
+      const reason = problem ?? "invalid";
+      return NextResponse.json({ valid: false, reason, error: INVITATION_MESSAGES[reason] });
+    }
     return NextResponse.json({
+      valid: true,
       email: invitation.email,
       role: invitation.role,
       organizationName: invitation.organization.name,
