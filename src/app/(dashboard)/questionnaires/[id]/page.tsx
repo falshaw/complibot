@@ -196,20 +196,26 @@ export default function QuestionnaireReviewPage() {
 
   async function handleGenerate() {
     setActionLoading(true);
-    await fetch(`/api/questionnaires/${id}/generate`, { method: "POST" });
-    toast.success("AI generation started");
+    const res = await fetch(`/api/questionnaires/${id}/generate`, {
+      method: "POST",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) toast.success(`Generated ${data.generated ?? 0} answers`);
+    else toast.error(data.error || "Answer generation failed");
     fetchData();
     setActionLoading(false);
   }
 
   async function handleParse() {
     setActionLoading(true);
-    await fetch(`/api/questionnaires/${id}/parse`, {
+    const res = await fetch(`/api/questionnaires/${id}/parse`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    toast.success("Parsing started");
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) toast.success(`Parsed ${data.questionCount ?? 0} questions`);
+    else toast.error(data.error || "Parsing failed");
     fetchData();
     setActionLoading(false);
   }

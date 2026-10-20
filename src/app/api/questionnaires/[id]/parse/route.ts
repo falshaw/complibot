@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
-import { parseQuestionnaire } from "@/lib/services/QuestionnaireParserService";
+import {
+  parseQuestionnaire,
+  QuestionnaireParseError,
+} from "@/lib/services/QuestionnaireParserService";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 
 // POST /api/questionnaires/[id]/parse - Trigger parsing
@@ -22,6 +25,15 @@ export const POST = apiHandler(
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
+    if (questionnaire.status !== "UPLOADED") {
+      return NextResponse.json(
+        {
+          error: `Questionnaire must be in UPLOADED status to parse (current: ${questionnaire.status})`,
+        },
+        { status: 400 },
+      );
+    }
+
     // Get column mapping from body or questionnaire
     let mapping = questionnaire.columnMapping as {
       questionCol?: string;
@@ -31,11 +43,19 @@ export const POST = apiHandler(
       mapping = body.columnMapping || { questionCol: "B" };
     }
 
-    const result = await parseQuestionnaire(
-      questionnaire.id,
-      questionnaire.filePath,
-      { questionCol: mapping?.questionCol || "B" },
-    );
+    let result: { questionCount: number };
+    try {
+      result = await parseQuestionnaire(
+        questionnaire.id,
+        questionnaire.filePath,
+        { questionCol: mapping?.questionCol || "B" },
+      );
+    } catch (error) {
+      if (error instanceof QuestionnaireParseError) {
+        return NextResponse.json({ error: error.message }, { status: 422 });
+      }
+      throw error;
+    }
 
     return NextResponse.json({
       message: "Parsing complete",

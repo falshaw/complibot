@@ -17,6 +17,14 @@ interface ColumnMapping {
   headerRow?: number;
 }
 
+/** A parse that cannot produce questions; the message is safe to show to users. */
+export class QuestionnaireParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QuestionnaireParseError";
+  }
+}
+
 interface ParsedQuestion {
   rowIndex: number;
   questionText: string;
@@ -132,6 +140,23 @@ export async function parseQuestionnaire(
     data: { status: "PARSING" },
   });
 
+  try {
+    return await parseAndStoreQuestions(questionnaireId, filePath, mapping);
+  } catch (error) {
+    // Leave the questionnaire re-parseable instead of stuck in PARSING.
+    await prisma.questionnaire.update({
+      where: { id: questionnaireId },
+      data: { status: "UPLOADED" },
+    });
+    throw error;
+  }
+}
+
+async function parseAndStoreQuestions(
+  questionnaireId: string,
+  filePath: string,
+  mapping: ColumnMapping,
+): Promise<{ questionCount: number }> {
   const isCSV = filePath.toLowerCase().endsWith(".csv");
   const parsed = isCSV
     ? await parseCSV(filePath, mapping)
@@ -142,11 +167,25 @@ export async function parseQuestionnaire(
     questionCount: parsed.length,
   });
 
-  // Classify domains and question types in batches
+  if (parsed.length === 0) {
+    throw new QuestionnaireParseError(
+      `No questions found in column ${mapping.questionCol} (after header row ${mapping.headerRow ?? 1}). ` +
+        'Check the file, or pass a columnMapping such as {"questionCol":"A","headerRow":1}.',
+    );
+  }
+
+  // Classify domains and question types. The domain only boosts retrieval,
+  // so a failed LLM classification falls back to GENERAL instead of failing
+  // the whole parse.
   const questions = [];
   for (const q of parsed) {
     const [domain, questionType] = await Promise.all([
-      classifyDomain(q.questionText),
+      classifyDomain(q.questionText).catch((error) => {
+        logger.warn("Domain classification failed, using GENERAL", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return "GENERAL" as const;
+      }),
       detectQuestionType(q.questionText),
     ]);
 
