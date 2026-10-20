@@ -8,6 +8,7 @@ import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { emailSchema, passwordSchema } from "./validators/password";
 import prisma from "./prisma";
 import type { Role } from "@prisma/client";
 import { authConfig } from "./auth.config";
@@ -49,14 +50,8 @@ async function clearFailedLogins(email: string): Promise<void> {
 }
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z
-    .string()
-    .min(12, "Password must be at least 12 characters")
-    .regex(
-      /[!@#$%^&*()_+\-=\[\]{}|;':",.<>?\/\\]/,
-      "Password must contain at least one special character",
-    ),
+  email: emailSchema,
+  password: passwordSchema,
 });
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -74,39 +69,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         try {
           const { email, password } = loginSchema.parse(credentials);
-
-          // Mock auth for development
-          const isDevEnv = process.env.NODE_ENV === "development";
-          const isMockEnabled = process.env.USE_MOCK_AUTH === "true";
-          const isProductionUrl = (process.env.NEXTAUTH_URL || "").includes(
-            "complibot.com",
-          );
-
-          if (isDevEnv && isMockEnabled && !isProductionUrl) {
-            const mockEmail = process.env.MOCK_AUTH_EMAIL;
-            const mockPassword = process.env.MOCK_AUTH_PASSWORD;
-            if (!mockEmail || !mockPassword) {
-              throw new Error(
-                "Mock auth enabled but credentials not configured",
-              );
-            }
-            if (email === mockEmail && password === mockPassword) {
-              logger.warn("MOCK AUTH LOGIN - development only", {
-                email: mockEmail,
-              });
-              return {
-                id: process.env.MOCK_AUTH_USER_ID || "mock-user-001",
-                email: mockEmail,
-                name: process.env.MOCK_AUTH_NAME || "Demo Admin",
-                image: null,
-                role: (process.env.MOCK_AUTH_ROLE || "ADMIN") as Role,
-                organizationId: process.env.MOCK_AUTH_ORG_ID || "mock-org-001",
-                organizationName:
-                  process.env.MOCK_AUTH_ORG_NAME || "Demo Organization",
-              };
-            }
-            return null;
-          }
 
           const lockout = await checkAccountLockout(email);
           if (lockout.locked) {
