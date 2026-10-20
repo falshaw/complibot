@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Edit3, Trash2, CheckCircle, Tag } from "lucide-react";
-import { toast } from "sonner";
 import Link from "next/link";
+import { toast } from "sonner";
+import { KnowledgeForm, type KnowledgeFormValues } from "@/components/KnowledgeForm";
+import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { domainLabel } from "@/lib/ui/labels";
 
 interface KnowledgeEntry {
   id: string;
@@ -18,173 +20,161 @@ interface KnowledgeEntry {
   updatedAt: string;
 }
 
+function fmt(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function KnowledgeEntryPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [entry, setEntry] = useState<KnowledgeEntry | null>(null);
+  const [missing, setMissing] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [domain, setDomain] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/knowledge/${id}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setEntry(data);
-        setQuestion(data.question);
-        setAnswer(data.answer);
-        setDomain(data.domain);
-      })
-      .finally(() => setLoading(false));
+    fetch(`/api/knowledge/${id}`).then(async (r) => {
+      if (r.ok) setEntry(await r.json());
+      else setMissing(true);
+    });
   }, [id]);
 
-  async function handleSave() {
-    const res = await fetch(`/api/knowledge/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, answer, domain }),
-    });
-    if (res.ok) {
-      const updated = await res.json();
-      setEntry(updated);
+  async function patch(body: Partial<KnowledgeFormValues> & { isVerified?: boolean }, ok: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/knowledge/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      setEntry(data);
       setEditing(false);
-      toast.success("Entry updated");
-    } else {
-      toast.error("Failed to update");
+      toast.success(ok);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function handleDelete() {
-    if (!confirm("Delete this knowledge entry?")) return;
+  async function remove() {
+    if (!confirm("Delete this knowledge entry? Answers that cited it keep their text.")) return;
+    setBusy(true);
     const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
     if (res.ok) {
       toast.success("Entry deleted");
       router.push("/knowledge");
     } else {
-      toast.error("Failed to delete");
+      toast.error("Could not delete the entry");
+      setBusy(false);
     }
   }
 
-  if (loading)
-    return <div className="text-slate-400 text-center py-12">Loading...</div>;
-  if (!entry)
+  if (missing) {
     return (
-      <div className="text-red-400 text-center py-12">Entry not found</div>
+      <EmptyState title="Entry not found" text="It may have been deleted.">
+        <Link href="/knowledge" className="btn btn-primary btn-sm">
+          Back to the knowledge base
+        </Link>
+      </EmptyState>
     );
+  }
+  if (!entry) return <LoadingBlocks rows={2} />;
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/knowledge"
-        className="text-sm text-slate-400 hover:text-white flex items-center gap-1 mb-4"
-      >
-        <ArrowLeft className="w-4 h-4" /> Back to Knowledge Base
-      </Link>
+      <PageHeader
+        eyebrow={
+          <>
+            <Link href="/knowledge" className="hover:text-accent">
+              Knowledge base
+            </Link>{" "}
+            / Entry
+          </>
+        }
+        title={editing ? "Edit entry" : "Knowledge entry"}
+        actions={
+          !editing && (
+            <>
+              <button
+                type="button"
+                className={`btn btn-sm ${entry.isVerified ? "btn-ghost" : "btn-primary"}`}
+                onClick={() =>
+                  patch(
+                    { isVerified: !entry.isVerified },
+                    entry.isVerified ? "Marked as not verified" : "Entry verified",
+                  )
+                }
+                disabled={busy}
+              >
+                {entry.isVerified ? "Unverify" : "Verify"}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)} disabled={busy}>
+                Edit
+              </button>
+              <button type="button" className="btn btn-danger btn-sm" onClick={remove} disabled={busy}>
+                Delete
+              </button>
+            </>
+          )
+        }
+      />
 
-      <div className="card-panel">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded">
-              {entry.domain.replace(/_/g, " ")}
-            </span>
-            {entry.isVerified && (
-              <span className="flex items-center gap-1 text-xs text-emerald-400">
-                <CheckCircle className="w-3.5 h-3.5" /> Verified
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setEditing(!editing)}
-              className="text-slate-400 hover:text-white p-1"
-            >
-              <Edit3 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleDelete}
-              className="text-red-400 hover:text-red-300 p-1"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
+      <section className="card p-5">
         {editing ? (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Question
-              </label>
-              <textarea
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                rows={3}
-                className="w-full px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm resize-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Answer
-              </label>
-              <textarea
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                rows={6}
-                className="w-full px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm resize-none"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleSave}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <KnowledgeForm
+            initial={entry}
+            submitLabel="Save changes"
+            busy={busy}
+            onSubmit={(v) => patch(v, "Entry updated")}
+            onCancel={() => setEditing(false)}
+          />
         ) : (
           <>
-            <h2 className="text-lg font-medium text-white mb-3">
-              {entry.question}
-            </h2>
-            <p className="text-slate-300 leading-relaxed whitespace-pre-wrap mb-4">
-              {entry.answer}
-            </p>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="badge b-blue">{domainLabel(entry.domain)}</span>
+              {entry.isVerified ? (
+                <span className="badge b-teal">verified</span>
+              ) : (
+                <span className="badge b-grey">not verified</span>
+              )}
+            </div>
+            <h2 className="!text-lg">{entry.question}</h2>
+            <p className="mt-3 whitespace-pre-wrap leading-relaxed text-ink">{entry.answer}</p>
             {entry.keywords.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <Tag className="w-3.5 h-3.5 text-slate-500" />
-                {entry.keywords.map((kw) => (
-                  <span
-                    key={kw}
-                    className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded"
-                  >
-                    {kw}
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {entry.keywords.map((k) => (
+                  <span key={k} className="rounded-full bg-line-2 px-2.5 py-0.5 font-mono text-xs text-ink-65">
+                    {k}
                   </span>
                 ))}
               </div>
             )}
+            <dl className="mt-5 grid gap-1 border-t border-line-2 pt-4 text-xs text-ink-65 sm:grid-cols-3">
+              <div>
+                <dt className="eyebrow">Source</dt>
+                <dd>{entry.source ? `${entry.source.name} (${entry.source.sourceType.toLowerCase()})` : "Added by hand"}</dd>
+              </div>
+              <div>
+                <dt className="eyebrow">Created</dt>
+                <dd>{fmt(entry.createdAt)}</dd>
+              </div>
+              <div>
+                <dt className="eyebrow">Updated</dt>
+                <dd>{fmt(entry.updatedAt)}</dd>
+              </div>
+            </dl>
           </>
         )}
-
-        <div className="mt-6 pt-4 border-t border-slate-700 text-xs text-slate-500">
-          {entry.source && (
-            <span>
-              Source: {entry.source.name} ({entry.source.sourceType})
-            </span>
-          )}
-          <span className="ml-4">
-            Created: {new Date(entry.createdAt).toLocaleDateString()}
-          </span>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

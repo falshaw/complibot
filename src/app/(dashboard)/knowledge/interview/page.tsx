@@ -2,57 +2,49 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Loader2 } from "lucide-react";
+import { Loader2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 export default function StartInterviewPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  async function handleStart() {
+  async function start() {
     setLoading(true);
     try {
       const res = await fetch("/api/interview", { method: "POST" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not start the interview");
       router.push(`/knowledge/interview/${data.sessionId}`);
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to start interview",
-      );
-    } finally {
+      toast.error(err instanceof Error ? err.message : "Could not start the interview");
       setLoading(false);
     }
   }
 
   return (
-    <div className="max-w-2xl mx-auto py-12">
-      <div className="card-panel text-center py-16">
-        <MessageSquare className="w-16 h-16 text-indigo-400 mx-auto mb-6" />
-        <h1 className="text-2xl font-bold text-white mb-3">
-          AI Knowledge Interview
-        </h1>
-        <p className="text-slate-400 mb-2 max-w-md mx-auto">
-          Answer questions about your organization&apos;s security posture. The
-          AI will extract knowledge entries from your responses to build your
-          knowledge base.
+    <>
+      <PageHeader
+        eyebrow="Tools"
+        title="AI interview"
+        sub="Answer questions about your security posture in plain words. Each answer is turned into knowledge-base entries."
+      />
+      <section className="card mx-auto max-w-xl px-6 py-10 text-center">
+        <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent">
+          <MessageSquare className="h-6 w-6" aria-hidden />
+        </div>
+        <h2 className="!text-lg">Build the knowledge base by talking it through</h2>
+        <p className="mx-auto mt-2 max-w-md text-[13px] text-ink-65">
+          Up to three questions per security domain, across 20 domains. Skip what does not apply and
+          finish whenever you like; entries are saved as you go. Extraction uses the local model, so
+          each reply can take a minute.
         </p>
-        <p className="text-sm text-slate-500 mb-8">
-          Covers 20 security domains. Takes about 15-20 minutes.
-        </p>
-        <button
-          onClick={handleStart}
-          disabled={loading}
-          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium inline-flex items-center gap-2"
-        >
-          {loading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <MessageSquare className="w-5 h-5" />
-          )}
-          Start Interview
+        <button type="button" onClick={start} disabled={loading} className="btn btn-primary mt-6">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <MessageSquare className="h-4 w-4" aria-hidden />}
+          Start interview
         </button>
-      </div>
-    </div>
+      </section>
+    </>
   );
 }

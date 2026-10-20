@@ -10,13 +10,13 @@ Security questionnaires repeat the same questions in different wording. Answerin
 
 - **Questionnaire upload and parsing**: Excel (`.xlsx`) and CSV. The question column is detected automatically (or set explicitly), questions are classified by type (yes/no, text, date, numeric, ...) and security domain (20 domains).
 - **RAG answer generation**: keyword search (always on) plus optional pgvector semantic search over the knowledge base; the top-scored entries go to the LLM, which drafts each answer with a confidence score and the source entries it used.
-- **Review workflow**: approve, reject, edit or regenerate answers; bulk-approve.
+- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; approve, reject, edit or regenerate answers; bulk-approve.
 - **Export**: completed questionnaires to Excel or a text report.
-- **Knowledge base**: import entries from spreadsheets/PDF sources, search, per-domain stats, and a **gap analysis** that shows thin domains.
+- **Knowledge base**: add, edit, verify and delete entries, import question/answer pairs from spreadsheets, search, per-domain stats, and a **gap analysis** that shows thin domains.
 - **Knowledge interview**: an AI-led interview that cycles through security domains and turns your replies into knowledge-base entries.
 - **Templates**: seeded questionnaire templates (SIG Lite, CAIQ v4, VSA, NIST CSF, ISO 27001, CIS Controls v8, SOC 2 readiness).
-- **Teams and RBAC**: organizations, invitations, roles.
-- **Audit log**: security-relevant actions recorded per organization.
+- **Teams and RBAC**: organizations, roles, member management. Invitations are recorded, but there is no join page yet and no email is sent.
+- **Audit trail**: review decisions, knowledge-base changes, uploads, exports, settings and team changes, recorded per organization.
 - **Security**: CSRF protection in middleware, Redis-backed rate limiting, login lockout, input sanitization, AES-256-GCM field encryption, least-privilege database role, hardened containers (read-only root, dropped capabilities, resource limits).
 
 ## Quick start
@@ -84,7 +84,7 @@ Open http://localhost:3005 (or your `COMPLIBOT_PORT`) and sign in as `admin@demo
 
 ### 4. Try it
 
-1. **Questionnaires → Upload**: upload a CSV or Excel file with one question per row, e.g.
+1. **Questionnaires → Upload**: upload [`samples/vendor-questionnaire.csv`](samples/vendor-questionnaire.csv) (or the `.xlsx` version). Any CSV or Excel file with one question per row works, e.g.
 
    ```csv
    Question
@@ -93,8 +93,12 @@ Open http://localhost:3005 (or your `COMPLIBOT_PORT`) and sign in as `admin@demo
    What is your password policy?
    ```
 
-2. **Parse Questions**, then **Generate Answers**. Generation calls the LLM once per question; on a laptop CPU/GPU expect seconds to a minute per answer depending on the model.
-3. Review each draft with its confidence score and cited knowledge-base entries, approve or edit, then **Export**.
+2. **Parse questions**, then **Generate answers**. Generation calls the LLM once per question, one at a time on Ollama; on a laptop CPU/GPU expect seconds to a couple of minutes per answer depending on the model. The page shows progress while it runs.
+3. Review each draft with its confidence score and cited knowledge-base entries, approve, reject, edit or regenerate, then **Export** to Excel or a text report.
+
+To add knowledge in bulk, upload [`samples/knowledge-base-import.csv`](samples/knowledge-base-import.csv) under **Knowledge Base → Upload source** (question column A, answer column B). **Templates** creates a ready-parsed assessment from SIG Lite, CAIQ, ISO 27001, SOC 2 and others.
+
+There is no self-registration: users are created by the seed (`admin@demo.com`, `reviewer@demo.com`) and managed under **Team**.
 
 Stop with `docker compose down` (add `-v` to delete the database volume).
 
@@ -200,6 +204,7 @@ See `.env.example` for all variables.
 | `LLM_PROVIDER` | no | `ollama` (default) or `claude` |
 | `OLLAMA_HOST`, `OLLAMA_MODEL` | no | default `http://host.docker.internal:11434`, `qwen2.5:7b` |
 | `EMBEDDING_MODEL` | no | default `nomic-embed-text`; `none` = keyword search only |
+| `LLM_CONCURRENCY` | no | answers drafted in parallel; default 1 on Ollama, 5 on the Claude bridge |
 | `OLLAMA_REASONING_EFFORT` | no | default `none`: turns thinking off for reasoning models (gemma4, qwen3, ...), which otherwise spend the token budget on hidden reasoning; empty = parameter not sent |
 | `CLAUDE_BRIDGE_URL`, `CLAUDE_BRIDGE_TOKEN`, `CLAUDE_MODEL` | no | only for `LLM_PROVIDER=claude` |
 | `COMPLIBOT_PORT`, `COMPLIBOT_DB_PORT`, `COMPLIBOT_REDIS_PORT` | no | host ports on 127.0.0.1 (3005, 5437, 6384) |

@@ -1,30 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
-import {
-  CheckCircle,
-  XCircle,
-  RefreshCw,
-  Download,
-  ChevronLeft,
-  ChevronRight,
-  Edit3,
-  BookOpen,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { clsx } from "clsx";
-
-interface Source {
-  id: string;
-  similarity: number;
-  knowledgeEntry: {
-    id: string;
-    question: string;
-    answer: string;
-    domain: string;
-  };
-}
+import { CitedEntry, type CitedSource } from "@/components/CitedEntry";
+import { EmptyState, LoadingBlocks } from "@/components/ui/PageHeader";
+import { answerStatus, domainLabel, typeLabel } from "@/lib/ui/labels";
 
 interface Answer {
   id: string;
@@ -33,7 +16,8 @@ interface Answer {
   confidence: number;
   status: string;
   aiGenerated: boolean;
-  sources: Source[];
+  reviewNote: string | null;
+  sources: CitedSource[];
 }
 
 interface Question {
@@ -48,424 +32,478 @@ interface Question {
 interface Questionnaire {
   id: string;
   name: string;
+  fileName: string | null;
   status: string;
   totalQuestions: number;
+  answeredCount: number;
   approvedCount: number;
   questions: Question[];
 }
 
-function ConfidenceBadge({ confidence }: { confidence: number }) {
-  const pct = Math.round(confidence * 100);
-  const cls =
-    confidence >= 0.8
-      ? "badge-high"
-      : confidence >= 0.5
-        ? "badge-medium"
-        : "badge-low";
-  return (
-    <span className={`${cls} px-2 py-0.5 rounded text-xs font-medium`}>
-      {pct}%
-    </span>
-  );
+const STEP_ORDER = ["UPLOADED", "PARSED", "IN_REVIEW", "EXPORTED"];
+
+/** How far along the upload -> parse -> generate -> review -> export flow. */
+function stepState(status: string) {
+  const reached = (s: string) =>
+    STEP_ORDER.indexOf(status === "COMPLETED" ? "IN_REVIEW" : status) >=
+    STEP_ORDER.indexOf(s);
+  return {
+    parse: reached("PARSED"),
+    generate: reached("IN_REVIEW"),
+    review: reached("IN_REVIEW"),
+    exported: status === "EXPORTED",
+  };
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const cls =
-    status === "APPROVED"
-      ? "status-approved"
-      : status === "REJECTED"
-        ? "status-rejected"
-        : "status-pending";
-  return (
-    <span className={`${cls} px-2 py-0.5 rounded text-xs font-medium`}>
-      {status}
-    </span>
-  );
+async function errorText(res: Response, fallback: string) {
+  const data = await res.json().catch(() => ({}));
+  return (data as { error?: string }).error || fallback;
 }
 
 export default function QuestionnaireReviewPage() {
   const { id } = useParams<{ id: string }>();
-  const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(
-    null,
-  );
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [q, setQ] = useState<Questionnaire | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [threshold, setThreshold] = useState(0.8);
+  const [index, setIndex] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [editContent, setEditContent] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const initialPick = useRef(false);
 
-  const fetchData = useCallback(() => {
-    fetch(`/api/questionnaires/${id}`)
-      .then((r) => r.json())
-      .then(setQuestionnaire)
-      .finally(() => setLoading(false));
+  const fetchData = useCallback(async () => {
+    const res = await fetch(`/api/questionnaires/${id}`);
+    if (!res.ok) {
+      setNotFound(true);
+      return null;
+    }
+    const data: Questionnaire = await res.json();
+    setQ(data);
+    return data;
   }, [id]);
 
   useEffect(() => {
-    fetchData();
+    fetchData().then((data) => {
+      if (!data || initialPick.current) return;
+      initialPick.current = true;
+      // ?q=<row> from the dashboard opens that question
+      const row = Number(new URLSearchParams(window.location.search).get("q"));
+      const i = row ? data.questions.findIndex((x) => x.rowIndex === row) : -1;
+      if (i >= 0) setIndex(i);
+    });
+    fetch("/api/organizations")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.organization && setThreshold(d.organization.confidenceThreshold))
+      .catch(() => {});
   }, [fetchData]);
 
-  const currentQuestion = questionnaire?.questions[currentIndex];
-  const currentAnswer = currentQuestion?.answers[0];
-
-  // Keyboard shortcuts
+  // While answers are being generated, refresh the list every few seconds.
   useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (editMode) return;
-      if (e.key === "ArrowRight" || e.key === "j")
-        setCurrentIndex((i) =>
-          Math.min(i + 1, (questionnaire?.questions.length || 1) - 1),
+    if (q?.status !== "GENERATING" && busy !== "generate") return;
+    const t = setInterval(fetchData, 4000);
+    return () => clearInterval(t);
+  }, [q?.status, busy, fetchData]);
+
+  const questions = q?.questions ?? [];
+  const current = questions[index];
+  const answer = current?.answers[0];
+
+  const go = useCallback(
+    (delta: number) => {
+      setEditMode(false);
+      setIndex((i) => Math.max(0, Math.min(i + delta, questions.length - 1)));
+    },
+    [questions.length],
+  );
+
+  async function act(
+    name: string,
+    url: string,
+    init: RequestInit,
+    ok: string,
+    fail: string,
+  ): Promise<boolean> {
+    setBusy(name);
+    try {
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        toast.error(await errorText(res, fail));
+        return false;
+      }
+      toast.success(ok);
+      return true;
+    } catch {
+      toast.error(fail);
+      return false;
+    } finally {
+      await fetchData();
+      setBusy(null);
+    }
+  }
+
+  async function approve() {
+    if (!answer) return;
+    const done = await act("approve", `/api/answers/${answer.id}/approve`, { method: "POST" }, "Answer approved", "Could not approve the answer");
+    if (done) go(1);
+  }
+
+  function reject() {
+    if (!answer) return;
+    return act(
+      "reject",
+      `/api/answers/${answer.id}/reject`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      "Answer rejected",
+      "Could not reject the answer",
+    );
+  }
+
+  function regenerate() {
+    if (!answer) return;
+    return act("regenerate", `/api/answers/${answer.id}/regenerate`, { method: "POST" }, "New draft generated", "Could not regenerate the answer");
+  }
+
+  async function saveEdit() {
+    if (!answer || !editContent.trim()) return;
+    const done = await act(
+      "edit",
+      `/api/answers/${answer.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editedContent: editContent }),
+      },
+      "Edit saved",
+      "Could not save the edit",
+    );
+    if (done) setEditMode(false);
+  }
+
+  async function parse() {
+    setBusy("parse");
+    try {
+      const res = await fetch(`/api/questionnaires/${id}/parse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) toast.success(`Parsed ${data.questionCount ?? 0} questions`);
+      else toast.error(data.error || "Parsing failed");
+    } catch {
+      toast.error("Parsing failed");
+    }
+    await fetchData();
+    setBusy(null);
+  }
+
+  async function generate() {
+    setBusy("generate");
+    try {
+      const res = await fetch(`/api/questionnaires/${id}/generate`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(
+          `Generated ${data.generated ?? 0} answers` +
+            (data.errors ? `, ${data.errors} failed` : ""),
         );
-      if (e.key === "ArrowLeft" || e.key === "k")
-        setCurrentIndex((i) => Math.max(i - 1, 0));
-      if (e.key === "a" && currentAnswer) handleApprove();
-      if (e.key === "r" && currentAnswer) handleReject();
-      if (e.key === "e" && currentAnswer) {
+      } else toast.error(data.error || "Answer generation failed");
+    } catch {
+      toast.error("Answer generation failed");
+    }
+    await fetchData();
+    setBusy(null);
+  }
+
+  async function bulkApprove() {
+    const ids = questions
+      .map((x) => x.answers[0])
+      .filter((a): a is Answer => !!a && a.status === "PENDING")
+      .map((a) => a.id);
+    if (ids.length === 0) return;
+    await act(
+      "bulk",
+      "/api/answers/bulk-approve",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answerIds: ids }),
+      },
+      `Approved ${ids.length} pending ${ids.length === 1 ? "answer" : "answers"}`,
+      "Bulk approve failed",
+    );
+  }
+
+  // Keyboard shortcuts (not while typing)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (editMode || busy || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
+      if (e.key === "ArrowRight" || e.key === "j") go(1);
+      else if (e.key === "ArrowLeft" || e.key === "k") go(-1);
+      else if (!answer) return;
+      else if (e.key === "a" && answer.status !== "APPROVED") approve();
+      else if (e.key === "r" && answer.status !== "REJECTED") reject();
+      else if (e.key === "e") {
+        setEditContent(answer.editedContent || answer.content);
         setEditMode(true);
-        setEditContent(currentAnswer.editedContent || currentAnswer.content);
       }
     }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
-  async function handleApprove() {
-    if (!currentAnswer) return;
-    setActionLoading(true);
-    await fetch(`/api/answers/${currentAnswer.id}/approve`, { method: "POST" });
-    toast.success("Answer approved");
-    fetchData();
-    setActionLoading(false);
-    setCurrentIndex((i) =>
-      Math.min(i + 1, (questionnaire?.questions.length || 1) - 1),
-    );
-  }
-
-  async function handleReject() {
-    if (!currentAnswer) return;
-    setActionLoading(true);
-    await fetch(`/api/answers/${currentAnswer.id}/reject`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    toast.info("Answer rejected");
-    fetchData();
-    setActionLoading(false);
-  }
-
-  async function handleRegenerate() {
-    if (!currentAnswer) return;
-    setActionLoading(true);
-    await fetch(`/api/answers/${currentAnswer.id}/regenerate`, {
-      method: "POST",
-    });
-    toast.success("Answer regenerated");
-    fetchData();
-    setActionLoading(false);
-  }
-
-  async function handleSaveEdit() {
-    if (!currentAnswer) return;
-    setActionLoading(true);
-    await fetch(`/api/answers/${currentAnswer.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ editedContent: editContent }),
-    });
-    toast.success("Edit saved");
-    setEditMode(false);
-    fetchData();
-    setActionLoading(false);
-  }
-
-  async function handleExport() {
-    const res = await fetch(`/api/questionnaires/${id}/export`, {
-      method: "POST",
-    });
-    if (res.ok) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${questionnaire?.name || "export"}.xlsx`;
-      a.click();
-      toast.success("Export downloaded");
-    }
-  }
-
-  async function handleGenerate() {
-    setActionLoading(true);
-    const res = await fetch(`/api/questionnaires/${id}/generate`, {
-      method: "POST",
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) toast.success(`Generated ${data.generated ?? 0} answers`);
-    else toast.error(data.error || "Answer generation failed");
-    fetchData();
-    setActionLoading(false);
-  }
-
-  async function handleParse() {
-    setActionLoading(true);
-    const res = await fetch(`/api/questionnaires/${id}/parse`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) toast.success(`Parsed ${data.questionCount ?? 0} questions`);
-    else toast.error(data.error || "Parsing failed");
-    fetchData();
-    setActionLoading(false);
-  }
-
-  if (loading)
-    return <div className="text-slate-400 text-center py-12">Loading...</div>;
-  if (!questionnaire)
+  if (notFound) {
     return (
-      <div className="text-red-400 text-center py-12">
-        Questionnaire not found
-      </div>
+      <EmptyState title="Questionnaire not found" text="It may have been deleted.">
+        <Link href="/questionnaires" className="btn btn-primary btn-sm">
+          All questionnaires
+        </Link>
+      </EmptyState>
     );
+  }
+  if (!q) return <LoadingBlocks />;
 
-  const progress =
-    questionnaire.totalQuestions > 0
-      ? Math.round(
-          (questionnaire.approvedCount / questionnaire.totalQuestions) * 100,
-        )
-      : 0;
+  const steps = stepState(q.status);
+  const open = questions.filter((x) => {
+    const s = x.answers[0]?.status;
+    return !s || s === "PENDING" || s === "FLAGGED";
+  }).length;
+  const pendingCount = questions.filter((x) => x.answers[0]?.status === "PENDING").length;
+  const generating = q.status === "GENERATING" || busy === "generate";
+  const shown = answer ? answer.editedContent || answer.content : "";
+  const lowConfidence = !!answer && answer.status !== "APPROVED" && answer.confidence < threshold;
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-xl font-bold text-white">{questionnaire.name}</h1>
-          <p className="text-sm text-slate-400">
-            {questionnaire.approvedCount}/{questionnaire.totalQuestions}{" "}
-            approved ({progress}%)
-          </p>
+    <>
+      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between md:gap-4">
+        <div className="min-w-0">
+          <div className="eyebrow mb-1 truncate">
+            <Link href="/questionnaires" className="hover:text-accent">
+              Questionnaires
+            </Link>{" "}
+            / {q.name}
+          </div>
+          <h1 className="sm:!text-[28px]">Review answers</h1>
         </div>
-        <div className="flex items-center gap-2">
-          {questionnaire.status === "UPLOADED" && (
-            <button
-              onClick={handleParse}
-              disabled={actionLoading}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm"
-            >
-              Parse Questions
+        <div className="flex flex-wrap gap-2">
+          {q.status === "UPLOADED" && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={parse} disabled={!!busy}>
+              {busy === "parse" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+              Parse questions
             </button>
           )}
-          {questionnaire.status === "PARSED" && (
-            <button
-              onClick={handleGenerate}
-              disabled={actionLoading}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg text-sm"
-            >
-              Generate Answers
+          {(q.status === "PARSED" || q.status === "GENERATING") && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={generate} disabled={!!busy || q.status === "GENERATING"}>
+              {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+              {generating ? "Generating answers…" : "Generate answers"}
             </button>
           )}
-          <button
-            onClick={handleExport}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1"
-          >
-            <Download className="w-3.5 h-3.5" /> Export
-          </button>
+          {pendingCount > 0 && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={bulkApprove} disabled={!!busy}>
+              Bulk approve ({pendingCount})
+            </button>
+          )}
+          {q.answeredCount > 0 && (
+            <Link href={`/questionnaires/${id}/export`} className="btn btn-primary btn-sm">
+              Export
+            </Link>
+          )}
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div className="w-full h-1.5 bg-slate-700 rounded-full mb-4 overflow-hidden">
-        <div
-          className="h-full bg-indigo-500 rounded-full transition-all"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
+      <ol className="steps mb-[18px] list-none p-0" aria-label="Progress">
+        <li className="done">1 Upload</li>
+        <li className={steps.parse ? "done" : "on"}>2 Parse</li>
+        <li className={steps.generate ? "done" : steps.parse ? "on" : ""}>3 Generate</li>
+        <li className={steps.exported ? "done" : steps.review ? "on" : ""}>4 Review</li>
+        <li className={steps.exported ? "on" : ""}>
+          {q.answeredCount > 0 ? <Link href={`/questionnaires/${id}/export`}>5 Export</Link> : "5 Export"}
+        </li>
+      </ol>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={() => setCurrentIndex((i) => Math.max(i - 1, 0))}
-          disabled={currentIndex === 0}
-          className="text-slate-400 hover:text-white disabled:opacity-30"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <span className="text-sm text-slate-400">
-          Question {currentIndex + 1} of {questionnaire.questions.length}
-        </span>
-        <button
-          onClick={() =>
-            setCurrentIndex((i) =>
-              Math.min(i + 1, questionnaire.questions.length - 1),
-            )
-          }
-          disabled={currentIndex >= questionnaire.questions.length - 1}
-          className="text-slate-400 hover:text-white disabled:opacity-30"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </button>
-      </div>
-
-      {/* Side-by-side panel */}
-      {currentQuestion && (
-        <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
-          {/* Left: Question */}
-          <div className="card-panel overflow-y-auto">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
-                #{currentQuestion.rowIndex}
-              </span>
-              <span className="text-xs bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded">
-                {currentQuestion.domain.replace(/_/g, " ")}
-              </span>
-              <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
-                {currentQuestion.questionType}
-              </span>
-            </div>
-            <p className="text-white leading-relaxed">
-              {currentQuestion.questionText}
-            </p>
-
-            {/* Sources */}
-            {currentAnswer?.sources && currentAnswer.sources.length > 0 && (
-              <div className="mt-6 border-t border-slate-700 pt-4">
-                <h4 className="text-xs font-medium text-slate-400 uppercase mb-2 flex items-center gap-1">
-                  <BookOpen className="w-3.5 h-3.5" /> KB Sources
-                </h4>
-                <div className="space-y-2">
-                  {currentAnswer.sources.map((s, i) => (
-                    <div
-                      key={s.id}
-                      className="text-xs bg-slate-800/50 p-2 rounded border border-slate-700/50"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-slate-400">Source {i + 1}</span>
-                        <span className="text-indigo-400">
-                          {Math.round(s.similarity * 100)}% match
-                        </span>
-                      </div>
-                      <p className="text-slate-300 line-clamp-2">
-                        {s.knowledgeEntry.question}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Answer */}
-          <div className="card-panel overflow-y-auto flex flex-col">
-            {currentAnswer ? (
-              <>
-                <div className="flex items-center gap-2 mb-3">
-                  <ConfidenceBadge confidence={currentAnswer.confidence} />
-                  <StatusBadge status={currentAnswer.status} />
-                  {currentAnswer.aiGenerated && (
-                    <span className="text-xs text-purple-400">
-                      AI Generated
-                    </span>
-                  )}
-                </div>
-
-                {editMode ? (
-                  <div className="flex-1 flex flex-col">
-                    <textarea
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      className="flex-1 bg-[#0f172a] border border-slate-700 rounded-lg p-3 text-white text-sm resize-none focus:outline-none focus:border-indigo-500"
-                    />
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={handleSaveEdit}
-                        disabled={actionLoading}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-sm"
-                      >
-                        Save
-                      </button>
-                      <button
-                        onClick={() => setEditMode(false)}
-                        className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1">
-                    <p className="text-slate-200 leading-relaxed whitespace-pre-wrap">
-                      {currentAnswer.editedContent || currentAnswer.content}
-                    </p>
-                    {currentAnswer.editedContent && (
-                      <p className="text-xs text-slate-500 mt-2 italic">
-                        Manually edited
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Action buttons */}
-                {!editMode && (
-                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-700">
-                    <button
-                      onClick={handleApprove}
-                      disabled={
-                        actionLoading || currentAnswer.status === "APPROVED"
-                      }
-                      className={clsx(
-                        "flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors",
-                        currentAnswer.status === "APPROVED"
-                          ? "bg-emerald-800/30 text-emerald-400 cursor-default"
-                          : "bg-emerald-600 hover:bg-emerald-700 text-white",
-                      )}
-                    >
-                      <CheckCircle className="w-3.5 h-3.5" /> Approve (A)
-                    </button>
-                    <button
-                      onClick={handleReject}
-                      disabled={actionLoading}
-                      className="flex items-center gap-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 px-3 py-1.5 rounded text-sm font-medium"
-                    >
-                      <XCircle className="w-3.5 h-3.5" /> Reject (R)
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditMode(true);
-                        setEditContent(
-                          currentAnswer.editedContent || currentAnswer.content,
-                        );
-                      }}
-                      disabled={actionLoading}
-                      className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" /> Edit (E)
-                    </button>
-                    <button
-                      onClick={handleRegenerate}
-                      disabled={actionLoading}
-                      className="flex items-center gap-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 px-3 py-1.5 rounded text-sm"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" /> Regenerate
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-slate-500 text-center py-8">
-                No answer generated yet. Click &quot;Generate Answers&quot; to
-                start.
-              </div>
-            )}
-          </div>
+      {generating && (
+        <div className="alert alert-warn mb-4" role="status">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+          <span>
+            Drafting answers with the local model: {q.answeredCount} of {q.totalQuestions} done.
+            Each answer can take a minute or more.
+          </span>
         </div>
       )}
 
-      {/* Keyboard shortcuts hint */}
-      <div className="mt-3 text-xs text-slate-600 text-center">
-        Shortcuts: ← → navigate | A approve | R reject | E edit
-      </div>
-    </div>
+      {questions.length === 0 ? (
+        <EmptyState
+          title={q.status === "UPLOADED" ? "Not parsed yet" : "No questions found"}
+          text={
+            q.status === "UPLOADED"
+              ? "Parse the file to read its questions. The question column is detected automatically."
+              : "The file had no question rows."
+          }
+        />
+      ) : (
+        <div className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <nav className="card overflow-hidden !bg-g-bg" aria-label="Questions">
+            <div className="flex justify-between border-b border-line px-4 py-3">
+              <b>{questions.length} questions</b>
+              <span className="text-ink-65">{open} open</span>
+            </div>
+            <ul className="max-h-[260px] overflow-y-auto lg:max-h-[620px]">
+              {questions.map((x, i) => {
+                const s = answerStatus(x.answers[0]?.status);
+                return (
+                  <li key={x.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditMode(false);
+                        setIndex(i);
+                      }}
+                      aria-current={i === index ? "true" : undefined}
+                      className={`flex w-full items-center justify-between gap-2.5 border-b border-line-2 px-4 py-3 text-left hover:bg-g-bg2 ${i === index ? "!bg-accent-soft" : ""}`}
+                    >
+                      <span className="min-w-0 truncate font-mono text-[13px]">
+                        #{x.rowIndex} {x.questionText}
+                      </span>
+                      <span className={`badge ${s.badge}`}>{s.label.toLowerCase()}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
+          {current && (
+            <section className="card grid min-w-0 gap-4 p-5" aria-live="polite">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="break-words !text-base">{current.questionText}</h2>
+                  <div className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1.5 text-[12.5px] text-ink-65">
+                    <span className="font-mono">row {current.rowIndex}</span>
+                    <span>
+                      Domain <b className="font-semibold text-ink">{domainLabel(current.domain)}</b>
+                    </span>
+                    <span>
+                      Type <b className="font-semibold text-ink">{typeLabel(current.questionType)}</b>
+                    </span>
+                    {answer && (
+                      <span>
+                        Confidence <b className="font-mono font-semibold text-ink">{answer.confidence.toFixed(2)}</b>
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className={`badge ${answerStatus(answer?.status).badge}`}>
+                  {answerStatus(answer?.status).label}
+                </span>
+              </div>
+
+              {!answer ? (
+                <p className="text-[13px] text-ink-65">
+                  {q.status === "PARSED"
+                    ? "No draft yet. Use “Generate answers” to draft every question from the knowledge base."
+                    : generating
+                      ? "Waiting for the model…"
+                      : "No draft for this question."}
+                </p>
+              ) : (
+                <>
+                  {lowConfidence && (
+                    <div className="flag-note" role="note">
+                      <span aria-hidden>⚠</span>
+                      <span>
+                        <b>
+                          Confidence {answer.confidence.toFixed(2)} is below the {threshold.toFixed(2)} threshold.
+                        </b>{" "}
+                        {answer.sources.length === 0
+                          ? "No knowledge-base entry matched this question. Check before approving."
+                          : "Check the cited entries before approving."}
+                      </span>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="eyebrow mb-1.5">
+                      {answer.editedContent ? "Edited answer" : "Drafted answer"}
+                    </div>
+                    {editMode ? (
+                      <div className="grid gap-2">
+                        <textarea
+                          className="input min-h-[140px]"
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          aria-label="Answer text"
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditMode(false)}>
+                            Cancel
+                          </button>
+                          <button type="button" className="btn btn-primary btn-sm" onClick={saveEdit} disabled={!!busy || !editContent.trim()}>
+                            Save edit
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="answer-box">{shown}</div>
+                    )}
+                  </div>
+
+                  {answer.sources.length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {answer.sources.map((s, i) => (
+                        <CitedEntry key={s.id} n={i + 1} source={s} />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[13px] text-ink-65">No knowledge-base entries cited.</p>
+                  )}
+
+                  {!editMode && (
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={!!busy}>
+                        {busy === "regenerate" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                        Regenerate
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setEditContent(shown);
+                          setEditMode(true);
+                        }}
+                        disabled={!!busy}
+                      >
+                        Edit
+                      </button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={reject} disabled={!!busy || answer.status === "REJECTED"}>
+                        Reject
+                      </button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={approve} disabled={!!busy || answer.status === "APPROVED"}>
+                        Approve
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="flex items-center justify-between border-t border-line-2 pt-3 text-xs text-ink-65">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(-1)} disabled={index === 0} aria-label="Previous question">
+                  <ChevronLeft className="h-4 w-4" aria-hidden />
+                </button>
+                <span>
+                  {index + 1} of {questions.length}
+                  <span className="hidden sm:inline"> · keys ← → · A approve · R reject · E edit</span>
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(1)} disabled={index >= questions.length - 1} aria-label="Next question">
+                  <ChevronRight className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+    </>
   );
 }

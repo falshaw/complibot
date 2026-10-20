@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 
@@ -22,6 +23,8 @@ export const GET = apiHandler(async ({ params, organizationId }) => {
                       question: true,
                       answer: true,
                       domain: true,
+                      isVerified: true,
+                      source: { select: { name: true, sourceType: true } },
                     },
                   },
                 },
@@ -46,7 +49,7 @@ export const GET = apiHandler(async ({ params, organizationId }) => {
 
 // DELETE /api/questionnaires/[id]
 export const DELETE = apiHandler(
-  async ({ params, organizationId }) => {
+  async ({ req, params, user, organizationId }) => {
     const questionnaire = await prisma.questionnaire.findUnique({
       where: { id: params.id, organizationId },
     });
@@ -59,6 +62,16 @@ export const DELETE = apiHandler(
     }
 
     await prisma.questionnaire.delete({ where: { id: params.id } });
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "questionnaire.delete",
+      entityType: "Questionnaire",
+      entityId: params.id,
+      details: { name: questionnaire.name },
+      req,
+    });
+
     return NextResponse.json({ message: "Deleted" });
   },
   { roles: ["ADMIN", "RESPONDER"] },

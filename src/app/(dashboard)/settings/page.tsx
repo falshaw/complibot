@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
-import { Building2, Users, SlidersHorizontal } from "lucide-react";
+import { LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 
 interface OrgData {
   id: string;
@@ -11,192 +11,145 @@ interface OrgData {
   confidenceThreshold: number;
   knowledgeEntryCount: number;
   questionnaireCount: number;
+  userCount: number;
 }
 
 export default function SettingsPage() {
   const { data: session } = useSession();
   const [org, setOrg] = useState<OrgData | null>(null);
-  const [orgName, setOrgName] = useState("");
+  const [name, setName] = useState("");
   const [threshold, setThreshold] = useState(0.8);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [savingThreshold, setSavingThreshold] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/organizations")
       .then((r) => r.json())
-      .then((data) => {
-        if (data.organization) {
-          setOrg(data.organization);
-          setOrgName(data.organization.name);
-          setThreshold(data.organization.confidenceThreshold ?? 0.8);
-        }
-      })
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (!d.organization) return;
+        setOrg(d.organization);
+        setName(d.organization.name);
+        setThreshold(d.organization.confidenceThreshold ?? 0.8);
+      });
   }, []);
 
-  async function handleSave() {
+  async function save(what: string, body: Record<string, unknown>, ok: string) {
     if (!org) return;
-    setSaving(true);
+    setSaving(what);
     try {
       const res = await fetch(`/api/organizations/${org.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: orgName }),
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("Failed to update");
-      toast.success("Organization updated");
-    } catch {
-      toast.error("Failed to save");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      setOrg({ ...org, ...body });
+      toast.success(ok);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save");
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   }
 
-  async function handleThresholdSave() {
-    if (!org) return;
-    setSavingThreshold(true);
-    try {
-      const res = await fetch(`/api/organizations/${org.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confidenceThreshold: threshold }),
-      });
-      if (!res.ok) throw new Error("Failed to update");
-      toast.success("Confidence threshold updated");
-    } catch {
-      toast.error("Failed to save threshold");
-    } finally {
-      setSavingThreshold(false);
-    }
-  }
+  if (!org) return <LoadingBlocks rows={3} />;
 
-  if (loading)
-    return <div className="text-slate-400 text-center py-12">Loading...</div>;
+  const t = Math.round(threshold * 100);
+  const flagFloor = Math.round(threshold * 62.5);
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-white mb-6">Settings</h1>
+      <PageHeader eyebrow="Tools" title="Settings" />
 
-      {/* Organization */}
-      <div className="card-panel mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Building2 className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-lg font-semibold text-white">Organization</h2>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Name</label>
-            <input
-              type="text"
-              value={orgName}
-              onChange={(e) => setOrgName(e.target.value)}
-              className="w-full px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm"
-            />
-          </div>
-          <div className="flex items-center gap-4 text-sm text-slate-400">
-            <span>KB Entries: {org?.knowledgeEntryCount || 0}</span>
-            <span>Questionnaires: {org?.questionnaireCount || 0}</span>
-          </div>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
-          >
-            {saving ? "Saving..." : "Save Changes"}
-          </button>
-        </div>
-      </div>
-
-      {/* Confidence Tuning (CB-06) */}
-      <div className="card-panel mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <SlidersHorizontal className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-lg font-semibold text-white">
-            AI Confidence Tuning
-          </h2>
-        </div>
-        <div className="space-y-4">
-          <p className="text-sm text-slate-400">
-            Answers with confidence at or above this threshold are marked as
-            &quot;Pending Review&quot;. Below this threshold, answers are
-            automatically flagged for manual attention.
+      <section className="card mb-4 p-5">
+        <h2 className="mb-3">Organization</h2>
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) save("name", { name: name.trim() }, "Organization name saved");
+          }}
+        >
+          <label className="grid gap-1.5">
+            <span className="text-[13px] font-semibold">Name</span>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={255} required />
+          </label>
+          <p className="text-xs text-ink-65">
+            {org.knowledgeEntryCount} knowledge-base entries · {org.questionnaireCount} questionnaires · {org.userCount} users
           </p>
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm text-slate-400">
-                Confidence Threshold
-              </label>
-              <span className="text-lg font-mono font-bold text-indigo-400">
-                {Math.round(threshold * 100)}%
-              </span>
-            </div>
-            <input
-              type="range"
-              min={10}
-              max={100}
-              step={5}
-              value={Math.round(threshold * 100)}
-              onChange={(e) => setThreshold(Number(e.target.value) / 100)}
-              className="w-full accent-indigo-500"
-            />
-            <div className="flex justify-between text-xs text-slate-600 mt-1">
-              <span>10% (Accept most)</span>
-              <span>100% (Flag most)</span>
-            </div>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={!!saving || !name.trim() || name.trim() === org.name}>
+              {saving === "name" ? "Saving…" : "Save name"}
+            </button>
           </div>
-          <div className="grid grid-cols-3 gap-3 text-center text-xs">
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
-              <div className="text-emerald-400 font-medium mb-1">
-                Auto-Approve
-              </div>
-              <div className="text-slate-400">
-                &ge; {Math.round(threshold * 100)}%
-              </div>
-            </div>
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-              <div className="text-amber-400 font-medium mb-1">Flagged</div>
-              <div className="text-slate-400">
-                {Math.round(threshold * 62.5)}% &ndash;{" "}
-                {Math.round(threshold * 100) - 1}%
-              </div>
-            </div>
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-              <div className="text-red-400 font-medium mb-1">
-                Low Confidence
-              </div>
-              <div className="text-slate-400">
-                &lt; {Math.round(threshold * 62.5)}%
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={handleThresholdSave}
-            disabled={savingThreshold}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
-          >
-            {savingThreshold ? "Saving..." : "Save Threshold"}
-          </button>
-        </div>
-      </div>
+        </form>
+      </section>
 
-      {/* Account */}
-      <div className="card-panel mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Users className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-lg font-semibold text-white">Account</h2>
+      <section className="card mb-4 p-5">
+        <h2 className="mb-1">Confidence threshold</h2>
+        <p className="mb-4 text-[13px] text-ink-65">
+          Drafts at or above the threshold go to review as pending. Drafts below it are flagged so a
+          reviewer checks them first.
+        </p>
+        <div className="mb-2 flex items-center justify-between">
+          <label htmlFor="threshold" className="text-[13px] font-semibold">
+            Threshold
+          </label>
+          <span className="font-mono text-lg font-bold text-accent">{(threshold).toFixed(2)}</span>
         </div>
-        <div className="space-y-3 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-slate-400">Email</span>
-            <span className="text-white">{session?.user?.email || "—"}</span>
+        <input
+          id="threshold"
+          type="range"
+          min={10}
+          max={100}
+          step={5}
+          value={t}
+          onChange={(e) => setThreshold(Number(e.target.value) / 100)}
+          className="w-full"
+        />
+        <div className="mt-1 flex justify-between text-xs text-ink-45">
+          <span>0.10 · flag few</span>
+          <span>1.00 · flag all</span>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-2 text-center text-xs sm:grid-cols-3">
+          <div className="rounded-xl bg-accent-soft p-3 text-accent">
+            <b className="block">Pending</b>≥ {t}%
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-400">Role</span>
-            <span className="text-white">{session?.user?.role || "—"}</span>
+          <div className="rounded-xl bg-amber-soft p-3 text-amber">
+            <b className="block">Flagged</b>
+            {flagFloor}% – {t - 1}%
+          </div>
+          <div className="rounded-xl bg-red-soft p-3 text-red">
+            <b className="block">Flagged, low</b>&lt; {flagFloor}%
           </div>
         </div>
-      </div>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm mt-4"
+          onClick={() => save("threshold", { confidenceThreshold: threshold }, "Threshold saved")}
+          disabled={!!saving || threshold === org.confidenceThreshold}
+        >
+          {saving === "threshold" ? "Saving…" : "Save threshold"}
+        </button>
+      </section>
+
+      <section className="card p-5">
+        <h2 className="mb-3">Your account</h2>
+        <dl className="grid gap-2 text-[13px]">
+          <div className="flex justify-between gap-3">
+            <dt className="text-ink-65">Name</dt>
+            <dd>{session?.user?.name || "—"}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-ink-65">Email</dt>
+            <dd className="truncate">{session?.user?.email || "—"}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-ink-65">Role</dt>
+            <dd>{session?.user?.role || "—"}</dd>
+          </div>
+        </dl>
+      </section>
     </div>
   );
 }

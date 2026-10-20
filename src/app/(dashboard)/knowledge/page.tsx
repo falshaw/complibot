@@ -2,14 +2,10 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import {
-  BookOpen,
-  Upload,
-  Search,
-  Filter,
-  Plus,
-  CheckCircle,
-} from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { BookOpen, Plus, Search, Upload } from "lucide-react";
+import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
+import { SECURITY_DOMAINS, domainLabel } from "@/lib/ui/labels";
 
 interface KnowledgeEntry {
   id: string;
@@ -17,176 +13,209 @@ interface KnowledgeEntry {
   answer: string;
   domain: string;
   isVerified: boolean;
-  keywords: string[];
   source: { name: string; sourceType: string } | null;
+  updatedAt: string;
+}
+
+interface Source {
+  id: string;
+  name: string;
+  status: string;
+  entriesCreated: number;
+  errorMessage: string | null;
   createdAt: string;
 }
 
-const DOMAINS = [
-  "ALL",
-  "ACCESS_CONTROL",
-  "AUTHENTICATION",
-  "ENCRYPTION",
-  "DATA_PROTECTION",
-  "INCIDENT_RESPONSE",
-  "NETWORK_SECURITY",
-  "CLOUD_SECURITY",
-  "PHYSICAL_SECURITY",
-  "BUSINESS_CONTINUITY",
-  "CHANGE_MANAGEMENT",
-  "VULNERABILITY_MANAGEMENT",
-  "LOGGING_MONITORING",
-  "THIRD_PARTY_RISK",
-  "COMPLIANCE",
-  "PRIVACY",
-  "ENDPOINT_SECURITY",
-  "APPLICATION_SECURITY",
-  "IDENTITY_MANAGEMENT",
-  "GOVERNANCE",
-  "GENERAL",
-];
+const PAGE_SIZE = 20;
+
+const SOURCE_TONE: Record<string, string> = {
+  completed: "b-teal",
+  processing: "b-blue",
+  pending: "b-grey",
+  failed: "b-red",
+};
 
 export default function KnowledgePage() {
+  // ?search= from the dashboard search box
+  const initial = useSearchParams().get("search") ?? "";
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
   const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState("");
-  const [domain, setDomain] = useState("ALL");
+  const [search, setSearch] = useState(initial);
+  const [query, setQuery] = useState(initial);
+  const [domain, setDomain] = useState("");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [sources, setSources] = useState<Source[]>([]);
+
+  // Debounce typing
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (search.trim() === query) return;
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search, query]);
+
+  const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
+  if (query) params.set("search", query);
+  if (domain) params.set("domain", domain);
+  const key = params.toString();
+  const loading = loadedKey !== key;
 
   useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: "20" });
-    if (search) params.set("search", search);
-    if (domain !== "ALL") params.set("domain", domain);
-
-    fetch(`/api/knowledge?${params}`)
-      .then((r) => r.json())
+    let live = true;
+    fetch(`/api/knowledge?${key}`)
+      .then((r) => (r.ok ? r.json() : { entries: [], total: 0 }))
       .then((data) => {
+        if (!live) return;
         setEntries(data.entries || []);
         setTotal(data.total || 0);
-      })
-      .finally(() => setLoading(false));
-  }, [search, domain, page]);
+        setLoadedKey(key);
+      });
+    return () => {
+      live = false;
+    };
+  }, [key]);
+
+  useEffect(() => {
+    fetch("/api/sources")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setSources((d?.sources ?? []).slice(0, 5)))
+      .catch(() => {});
+  }, []);
+
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-white">Knowledge Base</h1>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/knowledge/upload"
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
-          >
-            <Upload className="w-4 h-4" /> Upload Source
-          </Link>
-          <Link
-            href="/knowledge/interview"
-            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" /> AI Interview
-          </Link>
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Knowledge base"
+        title="Knowledge Base"
+        sub="Question and answer pairs the AI cites when it drafts answers."
+        actions={
+          <>
+            <Link href="/knowledge/new" className="btn btn-primary btn-sm">
+              <Plus className="h-3.5 w-3.5" aria-hidden /> New entry
+            </Link>
+            <Link href="/knowledge/upload" className="btn btn-ghost btn-sm">
+              <Upload className="h-3.5 w-3.5" aria-hidden /> Upload source
+            </Link>
+          </>
+        }
+      />
 
-      {/* Filters */}
-      <div className="flex gap-3 mb-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+        <div className="relative flex-1 sm:max-w-md">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-45" aria-hidden />
           <input
-            type="text"
+            type="search"
+            className="input !pl-10"
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            placeholder="Search questions or answers..."
-            className="w-full pl-10 pr-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-sm"
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search questions, answers or keywords…"
+            aria-label="Search knowledge base"
           />
         </div>
-        <div className="relative">
-          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <select
-            value={domain}
-            onChange={(e) => {
-              setDomain(e.target.value);
-              setPage(1);
-            }}
-            className="pl-10 pr-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm appearance-none cursor-pointer"
-          >
-            {DOMAINS.map((d) => (
-              <option key={d} value={d}>
-                {d === "ALL" ? "All Domains" : d.replace(/_/g, " ")}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          className="input sm:!w-60"
+          value={domain}
+          onChange={(e) => {
+            setDomain(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by domain"
+        >
+          <option value="">All domains</option>
+          {SECURITY_DOMAINS.map((d) => (
+            <option key={d} value={d}>
+              {domainLabel(d)}
+            </option>
+          ))}
+        </select>
       </div>
 
-      <div className="text-sm text-slate-400 mb-3">{total} entries</div>
+      <div className="mb-3 text-[13px] text-ink-65" aria-live="polite">
+        {loading ? "Loading…" : `${total} ${total === 1 ? "entry" : "entries"}`}
+        {query && !loading && <> matching “{query}”</>}
+      </div>
 
-      {loading ? (
-        <div className="text-slate-400 text-center py-12">Loading...</div>
-      ) : entries.length === 0 ? (
-        <div className="card-panel text-center py-16">
-          <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-          <h3 className="text-lg text-white mb-2">Knowledge base is empty</h3>
-          <p className="text-slate-400 mb-4">
-            Upload past questionnaires or start an AI interview
-          </p>
-        </div>
+      {!loading && entries.length === 0 ? (
+        <EmptyState
+          icon={<BookOpen />}
+          title={query || domain ? "No matching entries" : "Knowledge base is empty"}
+          text={
+            query || domain
+              ? "Try another search term or domain."
+              : "Add an entry by hand, upload past questionnaires with their answers, or run the AI interview."
+          }
+        >
+          <Link href="/knowledge/new" className="btn btn-primary btn-sm">
+            New entry
+          </Link>
+          <Link href="/knowledge/interview" className="btn btn-ghost btn-sm">
+            AI interview
+          </Link>
+        </EmptyState>
       ) : (
-        <div className="space-y-2">
-          {entries.map((entry) => (
-            <div key={entry.id} className="card-panel">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded">
-                      {entry.domain.replace(/_/g, " ")}
-                    </span>
-                    {entry.isVerified && (
-                      <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                    )}
-                    {entry.source && (
-                      <span className="text-xs text-slate-500">
-                        from {entry.source.name}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-white text-sm font-medium mb-1 line-clamp-1">
-                    {entry.question}
-                  </p>
-                  <p className="text-slate-400 text-sm line-clamp-2">
-                    {entry.answer}
-                  </p>
+        <ul className="card divide-y divide-line-2 overflow-hidden">
+          {entries.map((e) => (
+            <li key={e.id}>
+              <Link href={`/knowledge/${e.id}`} className="block px-4 py-3.5 hover:bg-g-bg">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className="badge b-blue">{domainLabel(e.domain)}</span>
+                  {e.isVerified ? (
+                    <span className="badge b-teal">verified</span>
+                  ) : (
+                    <span className="badge b-grey">not verified</span>
+                  )}
+                  <span className="text-xs text-ink-45">
+                    {e.source ? `from ${e.source.name}` : "added by hand"}
+                  </span>
                 </div>
-              </div>
-            </div>
+                <p className="truncate font-semibold">{e.question}</p>
+                <p className="line-clamp-2 text-[13px] text-ink-65">{e.answer}</p>
+              </Link>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
-      {/* Pagination */}
-      {total > 20 && (
-        <div className="flex items-center justify-center gap-2 mt-6">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="text-sm text-slate-400 hover:text-white disabled:opacity-30"
-          >
+      {pages > 1 && (
+        <div className="mt-4 flex items-center justify-center gap-3 text-[13px]">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPage((p) => p - 1)} disabled={page <= 1}>
             Previous
           </button>
-          <span className="text-sm text-slate-500">Page {page}</span>
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            disabled={entries.length < 20}
-            className="text-sm text-slate-400 hover:text-white disabled:opacity-30"
-          >
+          <span className="text-ink-65">
+            Page {page} of {pages}
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPage((p) => p + 1)} disabled={page >= pages}>
             Next
           </button>
         </div>
       )}
-    </div>
+
+      {sources.length > 0 && (
+        <section className="card mt-5 p-[18px]">
+          <h2 className="mb-3">Uploaded sources</h2>
+          <ul className="divide-y divide-line-2 text-[13px]">
+            {sources.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                <span className="min-w-0 truncate font-mono">{s.name}</span>
+                <span className="flex items-center gap-3 text-ink-65">
+                  {s.status === "completed" && <span>{s.entriesCreated} entries</span>}
+                  {s.status === "failed" && s.errorMessage && (
+                    <span className="max-w-[260px] truncate text-red" title={s.errorMessage}>
+                      {s.errorMessage}
+                    </span>
+                  )}
+                  <span className={`badge ${SOURCE_TONE[s.status] ?? "b-grey"}`}>{s.status}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
   );
 }

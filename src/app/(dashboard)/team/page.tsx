@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Users, UserPlus, Mail, Shield, Clock, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
+import { UserPlus, X } from "lucide-react";
+import { toast } from "sonner";
+import { LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 
 interface Member {
   id: string;
@@ -10,7 +13,6 @@ interface Member {
   role: string;
   isActive: boolean;
   lastLoginAt: string | null;
-  createdAt: string;
 }
 
 interface Invitation {
@@ -18,262 +20,230 @@ interface Invitation {
   email: string;
   role: string;
   expiresAt: string;
-  createdAt: string;
   invitedBy: { name: string | null; email: string } | null;
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: "Admin",
-  RESPONDER: "Responder",
-  REVIEWER: "Reviewer",
-  VIEWER: "Viewer",
-};
+const ROLES = [
+  { id: "ADMIN", label: "Admin", badge: "b-red" },
+  { id: "REVIEWER", label: "Reviewer", badge: "b-amber" },
+  { id: "RESPONDER", label: "Responder", badge: "b-blue" },
+  { id: "VIEWER", label: "Viewer", badge: "b-grey" },
+];
+const roleOf = (id: string) => ROLES.find((r) => r.id === id) ?? ROLES[3];
 
-const ROLE_COLORS: Record<string, string> = {
-  ADMIN: "bg-red-500/20 text-red-300",
-  RESPONDER: "bg-indigo-500/20 text-indigo-300",
-  REVIEWER: "bg-amber-500/20 text-amber-300",
-  VIEWER: "bg-slate-500/20 text-slate-300",
-};
+async function errorOf(res: Response, fallback: string) {
+  const d = await res.json().catch(() => ({}));
+  return (d as { error?: string }).error || fallback;
+}
 
 export default function TeamPage() {
-  const [members, setMembers] = useState<Member[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: session } = useSession();
+  const me = session?.user?.id;
+  const isAdmin = session?.user?.role === "ADMIN";
+  const [members, setMembers] = useState<Member[] | null>(null);
+  const [invites, setInvites] = useState<Invitation[]>([]);
   const [showInvite, setShowInvite] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("RESPONDER");
-  const [sending, setSending] = useState(false);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("RESPONDER");
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    loadData();
+  const load = useCallback(async () => {
+    const [m, i] = await Promise.all([fetch("/api/team/members"), fetch("/api/team/invite")]);
+    setMembers(m.ok ? await m.json() : []);
+    setInvites(i.ok ? await i.json() : []);
   }, []);
 
-  async function loadData() {
-    setLoading(true);
-    const [membersRes, invitesRes] = await Promise.all([
-      fetch("/api/team/members"),
-      fetch("/api/team/invite"),
-    ]);
-    if (membersRes.ok) setMembers(await membersRes.json());
-    if (invitesRes.ok) setInvitations(await invitesRes.json());
-    setLoading(false);
-  }
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  async function sendInvite() {
-    if (!inviteEmail) return;
-    setSending(true);
-    const res = await fetch("/api/team/invite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
-    });
-    if (res.ok) {
-      setInviteEmail("");
-      setShowInvite(false);
-      loadData();
+  async function run(p: Promise<Response>, ok: string, fail: string) {
+    setBusy(true);
+    try {
+      const res = await p;
+      if (!res.ok) throw new Error(await errorOf(res, fail));
+      toast.success(ok);
+      await load();
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : fail);
+      return false;
+    } finally {
+      setBusy(false);
     }
-    setSending(false);
   }
 
-  async function updateRole(userId: string, role: string) {
-    await fetch("/api/team/members", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, role }),
-    });
-    loadData();
-  }
-
-  async function removeMember(userId: string) {
-    if (!confirm("Remove this team member?")) return;
-    await fetch(`/api/team/members?userId=${userId}`, { method: "DELETE" });
-    loadData();
-  }
-
-  async function revokeInvite(id: string) {
-    await fetch(`/api/team/invite?id=${id}`, { method: "DELETE" });
-    loadData();
-  }
-
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-white/5 rounded w-48" />
-          <div className="h-64 bg-white/5 rounded" />
-        </div>
-      </div>
+  async function invite(e: React.FormEvent) {
+    e.preventDefault();
+    const done = await run(
+      fetch("/api/team/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role }),
+      }),
+      `Invitation created for ${email}`,
+      "Could not create the invitation",
     );
+    if (done) {
+      setEmail("");
+      setShowInvite(false);
+    }
   }
+
+  if (members === null) return <LoadingBlocks rows={2} />;
+  const active = members.filter((m) => m.isActive).length;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Users className="w-6 h-6 text-indigo-400" />
-            Team Management
-          </h1>
-          <p className="text-sm text-white/50 mt-1">
-            {members.length} member{members.length !== 1 ? "s" : ""} &middot;{" "}
-            {invitations.length} pending invite
-            {invitations.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <button
-          onClick={() => setShowInvite(!showInvite)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          <UserPlus className="w-4 h-4" />
-          Invite Member
-        </button>
-      </div>
+    <div className="max-w-4xl">
+      <PageHeader
+        eyebrow="Tools"
+        title="Team"
+        sub={`${active} active ${active === 1 ? "member" : "members"} · ${invites.length} pending ${invites.length === 1 ? "invitation" : "invitations"}`}
+        actions={
+          isAdmin && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowInvite((v) => !v)} aria-expanded={showInvite}>
+              <UserPlus className="h-3.5 w-3.5" aria-hidden /> Invite member
+            </button>
+          )
+        }
+      />
 
-      {/* Invite form */}
       {showInvite && (
-        <div className="card-panel p-4 border border-indigo-500/30">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-white font-medium">Send Invitation</h3>
-            <button onClick={() => setShowInvite(false)}>
-              <X className="w-4 h-4 text-white/40 hover:text-white" />
-            </button>
-          </div>
-          <div className="flex gap-3">
-            <input
-              type="email"
-              placeholder="email@company.com"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 text-sm focus:outline-none focus:border-indigo-500"
-            />
-            <select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value)}
-              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500"
-            >
-              <option value="RESPONDER">Responder</option>
-              <option value="REVIEWER">Reviewer</option>
-              <option value="VIEWER">Viewer</option>
-              <option value="ADMIN">Admin</option>
-            </select>
-            <button
-              onClick={sendInvite}
-              disabled={sending || !inviteEmail}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              {sending ? "Sending..." : "Send"}
-            </button>
-          </div>
-        </div>
+        <form className="card mb-4 grid gap-3 p-4 sm:grid-cols-[1fr_170px_auto]" onSubmit={invite}>
+          <input type="email" className="input" placeholder="name@company.com" aria-label="Email to invite" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <select className="input" aria-label="Role" value={role} onChange={(e) => setRole(e.target.value)}>
+            {ROLES.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <button type="submit" className="btn btn-primary" disabled={busy || !email}>
+            Create invitation
+          </button>
+        </form>
       )}
 
-      {/* Members table */}
-      <div className="card-panel overflow-hidden">
-        <div className="p-4 border-b border-white/5">
-          <h2 className="text-white font-medium flex items-center gap-2">
-            <Shield className="w-4 h-4 text-indigo-400" />
-            Members
-          </h2>
-        </div>
-        <div className="divide-y divide-white/5">
-          {members.map((member) => (
-            <div
-              key={member.id}
-              className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02]"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-300 text-sm font-medium">
-                  {(member.name || member.email)[0].toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-white text-sm font-medium">
-                    {member.name || member.email}
-                    {!member.isActive && (
-                      <span className="ml-2 text-xs text-red-400">
-                        (inactive)
+      <section className="card mb-4 overflow-x-auto">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Role</th>
+              <th className="hidden sm:table-cell">Last sign-in</th>
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => {
+              const r = roleOf(m.role);
+              const self = m.id === me;
+              return (
+                <tr key={m.id} className={m.isActive ? "" : "opacity-60"}>
+                  <td className="max-w-[260px]">
+                    <div className="flex items-center gap-2.5">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-bold text-white" aria-hidden>
+                        {(m.name || m.email)[0].toUpperCase()}
                       </span>
+                      <span className="min-w-0">
+                        <b className="block truncate font-semibold">
+                          {m.name || m.email}
+                          {self && <span className="ml-1.5 text-xs font-normal text-ink-45">(you)</span>}
+                        </b>
+                        <span className="block truncate text-xs text-ink-65">{m.email}</span>
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    {isAdmin && !self && m.isActive ? (
+                      <select
+                        className="input !h-8 !w-36 !text-[13px]"
+                        aria-label={`Role of ${m.email}`}
+                        value={m.role}
+                        disabled={busy}
+                        onChange={(e) =>
+                          run(
+                            fetch("/api/team/members", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ userId: m.id, role: e.target.value }),
+                            }),
+                            `Role changed to ${roleOf(e.target.value).label}`,
+                            "Could not change the role",
+                          )
+                        }
+                      >
+                        {ROLES.map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className={`badge ${m.isActive ? r.badge : "b-grey"}`}>{m.isActive ? r.label : "Removed"}</span>
                     )}
-                  </p>
-                  <p className="text-white/40 text-xs">{member.email}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <select
-                  value={member.role}
-                  onChange={(e) => updateRole(member.id, e.target.value)}
-                  className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white/70 text-xs focus:outline-none focus:border-indigo-500"
-                >
-                  {Object.entries(ROLE_LABELS).map(([val, label]) => (
-                    <option key={val} value={val}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <span
-                  className={`px-2 py-0.5 rounded text-xs font-medium ${ROLE_COLORS[member.role] || ROLE_COLORS.VIEWER}`}
-                >
-                  {ROLE_LABELS[member.role]}
-                </span>
-                <button
-                  onClick={() => removeMember(member.id)}
-                  className="text-white/20 hover:text-red-400 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+                  </td>
+                  <td className="hidden text-xs text-ink-65 sm:table-cell">
+                    {m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "never"}
+                  </td>
+                  <td className="text-right">
+                    {isAdmin && !self && m.isActive && (
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        disabled={busy}
+                        onClick={() => {
+                          if (!confirm(`Remove ${m.email} from the team? They can no longer sign in.`)) return;
+                          run(fetch(`/api/team/members?userId=${m.id}`, { method: "DELETE" }), "Member removed", "Could not remove the member");
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </section>
 
-      {/* Pending invitations */}
-      {invitations.length > 0 && (
-        <div className="card-panel overflow-hidden">
-          <div className="p-4 border-b border-white/5">
-            <h2 className="text-white font-medium flex items-center gap-2">
-              <Mail className="w-4 h-4 text-amber-400" />
-              Pending Invitations
-            </h2>
-          </div>
-          <div className="divide-y divide-white/5">
-            {invitations.map((inv) => (
-              <div
-                key={inv.id}
-                className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02]"
-              >
-                <div>
-                  <p className="text-white text-sm">{inv.email}</p>
-                  <p className="text-white/40 text-xs flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    Expires {new Date(inv.expiresAt).toLocaleDateString()}
-                    {inv.invitedBy && (
-                      <span>
-                        {" "}
-                        &middot; Invited by{" "}
-                        {inv.invitedBy.name || inv.invitedBy.email}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs font-medium ${ROLE_COLORS[inv.role]}`}
-                  >
-                    {ROLE_LABELS[inv.role]}
+      {invites.length > 0 && (
+        <section className="card p-[18px]">
+          <h2 className="mb-1">Pending invitations</h2>
+          <p className="mb-3 text-xs text-ink-65">
+            Invitations are stored here; CompliBot does not send email.
+          </p>
+          <ul className="divide-y divide-line-2">
+            {invites.map((i) => (
+              <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0">
+                  <b className="block truncate font-semibold">{i.email}</b>
+                  <span className="text-xs text-ink-65">
+                    Expires {new Date(i.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                    {i.invitedBy && <> · invited by {i.invitedBy.name || i.invitedBy.email}</>}
                   </span>
-                  <button
-                    onClick={() => revokeInvite(inv.id)}
-                    className="text-white/20 hover:text-red-400 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className={`badge ${roleOf(i.role).badge}`}>{roleOf(i.role).label}</span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="theme-btn !px-2"
+                      aria-label={`Revoke invitation for ${i.email}`}
+                      disabled={busy}
+                      onClick={() => run(fetch(`/api/team/invite?id=${i.id}`, { method: "DELETE" }), "Invitation revoked", "Could not revoke the invitation")}
+                    >
+                      <X aria-hidden />
+                    </button>
+                  )}
+                </span>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </section>
       )}
     </div>
   );

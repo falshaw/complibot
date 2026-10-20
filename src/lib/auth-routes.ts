@@ -2,13 +2,7 @@
  * CompliBot - Public route definitions
  */
 
-export const PUBLIC_ROUTES = [
-  "/",
-  "/login",
-  "/register",
-  "/terms",
-  "/privacy",
-];
+export const PUBLIC_ROUTES = ["/login"];
 
 export const PUBLIC_API_ROUTES = ["/api/auth", "/api/health"];
 

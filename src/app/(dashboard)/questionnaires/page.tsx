@@ -2,126 +2,115 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import {
-  FileText,
-  Upload,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  Download,
-} from "lucide-react";
+import { FileText, Table2, Upload } from "lucide-react";
+import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { pct, questionnaireStatus } from "@/lib/ui/labels";
 
 interface Questionnaire {
   id: string;
   name: string;
+  fileName: string | null;
   status: string;
   totalQuestions: number;
   answeredCount: number;
   approvedCount: number;
   createdAt: string;
+  metadata: { framework?: string; templateName?: string } | null;
 }
 
-const STATUS_ICONS: Record<string, typeof Clock> = {
-  UPLOADED: Upload,
-  PARSING: Clock,
-  PARSED: FileText,
-  GENERATING: Clock,
-  IN_REVIEW: AlertCircle,
-  COMPLETED: CheckCircle,
-  EXPORTED: Download,
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  UPLOADED: "text-slate-400",
-  PARSING: "text-amber-400",
-  PARSED: "text-blue-400",
-  GENERATING: "text-purple-400",
-  IN_REVIEW: "text-amber-400",
-  COMPLETED: "text-emerald-400",
-  EXPORTED: "text-emerald-400",
-};
-
 export default function QuestionnairesPage() {
-  const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<Questionnaire[] | null>(null);
 
   useEffect(() => {
-    fetch("/api/questionnaires")
-      .then((r) => r.json())
-      .then((data) => setQuestionnaires(data.questionnaires || []))
-      .finally(() => setLoading(false));
+    fetch("/api/questionnaires?limit=100")
+      .then((r) => (r.ok ? r.json() : { questionnaires: [] }))
+      .then((data) => setItems(data.questionnaires || []))
+      .catch(() => setItems([]));
   }, []);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-white">Questionnaires</h1>
-        <Link
-          href="/questionnaires/upload"
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+    <>
+      <PageHeader
+        eyebrow="Questionnaires"
+        title="Questionnaires"
+        sub="Uploaded files and assessments started from a template."
+        actions={
+          <>
+            <Link href="/questionnaires/upload" className="btn btn-primary btn-sm">
+              <Upload className="h-3.5 w-3.5" aria-hidden /> Upload
+            </Link>
+            <Link href="/templates" className="btn btn-ghost btn-sm">
+              <Table2 className="h-3.5 w-3.5" aria-hidden /> From a template
+            </Link>
+          </>
+        }
+      />
+
+      {items === null ? (
+        <LoadingBlocks />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<FileText />}
+          title="No questionnaires yet"
+          text="Upload a vendor questionnaire (CSV or Excel), or start an assessment from one of the built-in templates."
         >
-          <Upload className="w-4 h-4" /> Upload New
-        </Link>
-      </div>
-
-      {loading ? (
-        <div className="text-slate-400 text-center py-12">Loading...</div>
-      ) : questionnaires.length === 0 ? (
-        <div className="card-panel text-center py-16">
-          <FileText className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-          <h3 className="text-lg text-white mb-2">No questionnaires yet</h3>
-          <p className="text-slate-400 mb-4">
-            Upload your first security questionnaire to get started
-          </p>
-          <Link
-            href="/questionnaires/upload"
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-          >
-            Upload Questionnaire
+          <Link href="/questionnaires/upload" className="btn btn-primary btn-sm">
+            Upload questionnaire
           </Link>
-        </div>
+          <Link href="/templates" className="btn btn-ghost btn-sm">
+            Browse templates
+          </Link>
+        </EmptyState>
       ) : (
-        <div className="space-y-3">
-          {questionnaires.map((q) => {
-            const Icon = STATUS_ICONS[q.status] || FileText;
-            const color = STATUS_COLORS[q.status] || "text-slate-400";
-            const progress =
-              q.totalQuestions > 0
-                ? Math.round((q.approvedCount / q.totalQuestions) * 100)
-                : 0;
-
-            return (
-              <Link
-                key={q.id}
-                href={`/questionnaires/${q.id}`}
-                className="card-panel flex items-center justify-between hover:border-indigo-500/30 transition-colors block"
-              >
-                <div className="flex items-center gap-4">
-                  <Icon className={`w-6 h-6 ${color}`} />
-                  <div>
-                    <h3 className="text-white font-medium">{q.name}</h3>
-                    <p className="text-sm text-slate-400">
-                      {q.totalQuestions} questions | {q.answeredCount} answered
-                      | {q.approvedCount} approved
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-indigo-500 rounded-full"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <span className={`text-sm font-medium ${color}`}>
-                    {q.status.replace(/_/g, " ")}
-                  </span>
-                </div>
-              </Link>
-            );
-          })}
+        <div className="card overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Questionnaire</th>
+                <th className="hidden md:table-cell">Source</th>
+                <th className="hidden sm:table-cell">Answered</th>
+                <th className="hidden sm:table-cell">Approved</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((q) => {
+                const s = questionnaireStatus(q.status);
+                const p = pct(q.approvedCount, q.totalQuestions);
+                return (
+                  <tr key={q.id}>
+                    <td className="max-w-[280px]">
+                      <Link href={`/questionnaires/${q.id}`} className="block truncate font-semibold hover:text-accent">
+                        {q.name}
+                      </Link>
+                      <div className="text-xs text-ink-45">
+                        {new Date(q.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                      </div>
+                    </td>
+                    <td className="hidden max-w-[200px] truncate font-mono text-xs text-ink-65 md:table-cell">
+                      {q.metadata?.framework ?? q.fileName ?? "—"}
+                    </td>
+                    <td className="hidden font-mono text-xs sm:table-cell">
+                      {q.answeredCount}/{q.totalQuestions}
+                    </td>
+                    <td className="hidden sm:table-cell">
+                      <div className="flex items-center gap-2">
+                        <span className="track w-[90px]">
+                          <span style={{ width: `${p}%`, background: "var(--teal)" }} />
+                        </span>
+                        <span className="font-mono text-xs">{q.approvedCount}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`pill ${s.tone}`}>{s.label}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
-    </div>
+    </>
   );
 }

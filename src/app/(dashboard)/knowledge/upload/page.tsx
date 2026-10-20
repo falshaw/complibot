@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Upload, FileText, Loader2 } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/PageHeader";
+
+const COL = /^[A-Z]{1,2}$/;
 
 export default function KnowledgeUploadPage() {
   const router = useRouter();
@@ -12,130 +16,80 @@ export default function KnowledgeUploadPage() {
   const [answerCol, setAnswerCol] = useState("B");
   const [loading, setLoading] = useState(false);
 
-  async function handleUpload() {
-    if (!file) return;
+  const colsOk = COL.test(questionCol) && COL.test(answerCol);
+
+  async function handleUpload(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file || !colsOk) return;
     setLoading(true);
 
     const formData = new FormData();
     formData.append("file", file);
     formData.append("sourceType", "QUESTIONNAIRE");
-    formData.append(
-      "columnMapping",
-      JSON.stringify({
-        questionCol,
-        answerCol,
-      }),
-    );
+    formData.append("columnMapping", JSON.stringify({ questionCol, answerCol }));
 
     try {
-      const res = await fetch("/api/sources", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Source uploaded and processing started");
+      const res = await fetch("/api/sources", { method: "POST", body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success("Source uploaded. Entries are being imported.");
       router.push("/knowledge");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
-    } finally {
       setLoading(false);
     }
   }
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-white mb-6">
-        Upload to Knowledge Base
-      </h1>
+      <PageHeader
+        eyebrow={
+          <>
+            <Link href="/knowledge" className="hover:text-accent">
+              Knowledge base
+            </Link>{" "}
+            / Upload
+          </>
+        }
+        title="Upload a source"
+        sub="A completed questionnaire (Excel or CSV) with one question and its answer per row. Each row becomes a knowledge-base entry."
+      />
 
-      <div className="card-panel space-y-6">
-        {/* File drop zone */}
-        <div
-          className="border-2 border-dashed border-slate-600 rounded-xl p-8 text-center cursor-pointer hover:border-indigo-500/50 transition-colors"
-          onClick={() => document.getElementById("file-input")?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const f = e.dataTransfer.files[0];
-            if (f) setFile(f);
-          }}
-        >
+      <form className="card grid gap-5 p-5" onSubmit={handleUpload}>
+        <label className="grid gap-1.5">
+          <span className="text-[13px] font-semibold">File</span>
           <input
-            id="file-input"
             type="file"
+            className="input"
             accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            required
           />
-          {file ? (
-            <div className="flex items-center justify-center gap-3">
-              <FileText className="w-8 h-8 text-indigo-400" />
-              <div className="text-left">
-                <p className="text-white font-medium">{file.name}</p>
-                <p className="text-sm text-slate-400">
-                  {(file.size / 1024).toFixed(0)} KB
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-              <p className="text-white mb-1">
-                Drop a file here or click to browse
-              </p>
-              <p className="text-sm text-slate-400">
-                Excel (.xlsx) or CSV with Q&A pairs
-              </p>
-            </>
-          )}
-        </div>
+          <span className="text-xs text-ink-65">
+            {file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : ".xlsx, .xls or .csv, up to 10 MB"}
+          </span>
+        </label>
 
-        {/* Column mapping */}
-        <div>
-          <h3 className="text-white font-medium mb-3">Column Mapping</h3>
+        <fieldset className="grid gap-3">
+          <legend className="mb-1.5 text-[13px] font-semibold">Columns</legend>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Question Column
-              </label>
-              <input
-                type="text"
-                value={questionCol}
-                onChange={(e) => setQuestionCol(e.target.value.toUpperCase())}
-                maxLength={2}
-                className="w-full px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm"
-                placeholder="A"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Answer Column
-              </label>
-              <input
-                type="text"
-                value={answerCol}
-                onChange={(e) => setAnswerCol(e.target.value.toUpperCase())}
-                maxLength={2}
-                className="w-full px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm"
-                placeholder="B"
-              />
-            </div>
+            <label className="grid gap-1.5">
+              <span className="text-xs text-ink-65">Question column</span>
+              <input className="input font-mono" value={questionCol} maxLength={2} onChange={(e) => setQuestionCol(e.target.value.toUpperCase())} placeholder="A" />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs text-ink-65">Answer column</span>
+              <input className="input font-mono" value={answerCol} maxLength={2} onChange={(e) => setAnswerCol(e.target.value.toUpperCase())} placeholder="B" />
+            </label>
           </div>
-        </div>
+          {!colsOk && <p className="text-xs text-red">Use column letters, for example A and B.</p>}
+        </fieldset>
 
-        <button
-          onClick={handleUpload}
-          disabled={!file || loading}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-medium flex items-center justify-center gap-2"
-        >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Upload className="w-4 h-4" />
-          )}
-          Upload & Process
+        <button type="submit" className="btn btn-primary" disabled={!file || !colsOk || loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Upload className="h-4 w-4" aria-hidden />}
+          Upload and import
         </button>
-      </div>
+      </form>
     </div>
   );
 }

@@ -1,27 +1,16 @@
 /**
- * CompliBot - Questionnaire Templates (CB-03)
- * Browse built-in + custom templates. Create questionnaire from template,
- * clone, preview questions, filter by framework.
+ * CompliBot - Questionnaire templates (CB-03)
+ * Built-in + custom templates: start an assessment, clone, preview questions.
  */
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import {
-  FileText,
-  Copy,
-  Plus,
-  Shield,
-  RefreshCw,
-  Search,
-  CheckCircle,
-  Play,
-  ChevronDown,
-  X,
-  Hash,
-  Tag,
-} from "lucide-react";
+import { Copy, Eye, Loader2, Play, Search, X } from "lucide-react";
+import { toast } from "sonner";
+import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { domainLabel, typeLabel } from "@/lib/ui/labels";
 
 interface TemplateQuestion {
   text: string;
@@ -40,408 +29,235 @@ interface Template {
   questionCount: number;
   domains: string[];
   questions?: TemplateQuestion[];
-  createdAt: string;
 }
 
 export default function TemplatesPage() {
   const router = useRouter();
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [templates, setTemplates] = useState<Template[] | null>(null);
   const [search, setSearch] = useState("");
-  const [frameworkFilter, setFrameworkFilter] = useState<string>("all");
-  const [cloning, setCloning] = useState<string | null>(null);
-  const [creating, setCreating] = useState<string | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
+  const [framework, setFramework] = useState("all");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Template | null>(null);
 
-  const fetchTemplates = async () => {
+  const load = useCallback(async () => {
     try {
       const res = await fetch("/api/templates");
       const json = await res.json();
-      if (json.success) setTemplates(json.templates);
+      setTemplates(json.success ? json.templates : []);
     } catch {
-      /* silent */
+      setTemplates([]);
+      toast.error("Could not load templates");
     }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    fetchTemplates();
   }, []);
 
-  // Load full template with questions when preview is opened
   useEffect(() => {
-    if (!previewId) {
-      setPreviewTemplate(null);
-      return;
-    }
-    (async () => {
-      try {
-        const res = await fetch(`/api/templates/${previewId}`);
-        const json = await res.json();
-        if (json.success) setPreviewTemplate(json.template);
-      } catch {
-        /* silent */
-      }
-    })();
-  }, [previewId]);
+    load();
+  }, [load]);
 
-  const handleClone = async (id: string) => {
-    setCloning(id);
+  async function openPreview(id: string) {
+    setBusy(`preview-${id}`);
     try {
-      const res = await fetch(`/api/templates/${id}`, { method: "POST" });
-      if (res.ok) await fetchTemplates();
+      const res = await fetch(`/api/templates/${id}`);
+      const json = await res.json();
+      if (!json.success) throw new Error();
+      setPreview(json.template);
     } catch {
-      /* silent */
+      toast.error("Could not load the template");
+    } finally {
+      setBusy(null);
     }
-    setCloning(null);
-  };
+  }
 
-  const handleCreateFromTemplate = async (
-    templateId: string,
-    _templateName: string,
-  ) => {
-    setCreating(templateId);
+  async function clone(t: Template) {
+    setBusy(`clone-${t.id}`);
+    try {
+      const res = await fetch(`/api/templates/${t.id}`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      toast.success(`Copied “${t.name}” to your templates`);
+      await load();
+    } catch {
+      toast.error("Could not copy the template");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function start(t: Template) {
+    setBusy(`start-${t.id}`);
     try {
       const res = await fetch("/api/questionnaires/from-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templateId }),
+        body: JSON.stringify({ templateId: t.id }),
       });
-      const json = await res.json();
-      if (json.success && json.questionnaire) {
-        router.push(`/questionnaires/${json.questionnaire.id}`);
-        return;
-      }
-    } catch {
-      /* silent */
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.questionnaire) throw new Error(json.error);
+      toast.success(`Started ${json.questionnaire.name}`);
+      router.push(`/questionnaires/${json.questionnaire.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Could not start the assessment");
+      setBusy(null);
     }
-    setCreating(null);
-  };
-
-  const frameworks = [
-    "all",
-    ...new Set(templates.map((t) => t.framework).filter(Boolean)),
-  ] as string[];
-
-  const filtered = templates.filter((t) => {
-    const matchesSearch =
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      t.framework?.toLowerCase().includes(search.toLowerCase()) ||
-      t.description?.toLowerCase().includes(search.toLowerCase());
-    const matchesFramework =
-      frameworkFilter === "all" || t.framework === frameworkFilter;
-    return matchesSearch && matchesFramework;
-  });
-
-  const builtIn = filtered.filter((t) => t.isBuiltIn);
-  const custom = filtered.filter((t) => !t.isBuiltIn);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw className="w-6 h-6 text-indigo-400 animate-spin" />
-      </div>
-    );
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <FileText className="w-6 h-6 text-indigo-400" />
-            Questionnaire Templates
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Start from industry-standard frameworks or create your own
-          </p>
-        </div>
-      </div>
+  if (templates === null) return <LoadingBlocks />;
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search templates..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500"
-          />
-        </div>
-        {frameworks.length > 2 && (
-          <div className="flex gap-2 flex-wrap">
-            {frameworks.map((fw) => (
-              <button
-                key={fw}
-                onClick={() => setFrameworkFilter(fw)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  frameworkFilter === fw
-                    ? "bg-indigo-600 text-white"
-                    : "bg-slate-800 text-slate-400 hover:text-white border border-slate-700"
-                }`}
-              >
-                {fw === "all" ? "All" : fw}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Built-in Templates */}
-      {builtIn.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Shield className="w-4 h-4" /> Industry Frameworks ({builtIn.length}
-            )
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {builtIn.map((t) => (
-              <TemplateCard
-                key={t.id}
-                template={t}
-                onClone={handleClone}
-                onCreate={handleCreateFromTemplate}
-                onPreview={setPreviewId}
-                cloning={cloning === t.id}
-                creating={creating === t.id}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Custom Templates */}
-      {custom.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Custom Templates ({custom.length})
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {custom.map((t) => (
-              <TemplateCard
-                key={t.id}
-                template={t}
-                onClone={handleClone}
-                onCreate={handleCreateFromTemplate}
-                onPreview={setPreviewId}
-                cloning={cloning === t.id}
-                creating={creating === t.id}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {filtered.length === 0 && (
-        <div className="text-center py-16 text-slate-500">
-          <FileText className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p>No templates found</p>
-        </div>
-      )}
-
-      {/* Preview Modal */}
-      {previewId && previewTemplate && (
-        <TemplatePreviewModal
-          template={previewTemplate}
-          onClose={() => setPreviewId(null)}
-          onCreate={handleCreateFromTemplate}
-          creating={creating === previewTemplate.id}
-        />
-      )}
-    </div>
+  const frameworks = ["all", ...new Set(templates.map((t) => t.framework).filter((f): f is string => !!f))];
+  const term = search.toLowerCase();
+  const filtered = templates.filter(
+    (t) =>
+      (framework === "all" || t.framework === framework) &&
+      [t.name, t.framework, t.description].some((v) => v?.toLowerCase().includes(term)),
   );
-}
-
-function TemplateCard({
-  template,
-  onClone,
-  onCreate,
-  onPreview,
-  cloning,
-  creating,
-}: {
-  template: Template;
-  onClone: (id: string) => void;
-  onCreate: (id: string, name: string) => void;
-  onPreview: (id: string) => void;
-  cloning: boolean;
-  creating: boolean;
-}) {
-  return (
-    <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-5 hover:border-indigo-500/40 transition-colors">
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-white truncate">{template.name}</h3>
-          {template.framework && (
-            <span className="inline-block text-xs px-2 py-0.5 mt-1 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
-              {template.framework}
-            </span>
-          )}
-        </div>
-        {template.isBuiltIn && (
-          <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-1" />
-        )}
-      </div>
-
-      {template.description && (
-        <p className="text-sm text-slate-400 mb-3 line-clamp-2">
-          {template.description}
-        </p>
-      )}
-
-      <div className="flex items-center justify-between text-xs text-slate-500 mb-4">
-        <span className="flex items-center gap-1">
-          <Hash className="w-3 h-3" />
-          {template.questionCount} questions
-        </span>
-        <span className="flex items-center gap-1">
-          <Tag className="w-3 h-3" />
-          {template.domains.length} domains
-        </span>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => onCreate(template.id, template.name)}
-          disabled={creating}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600/15 border border-emerald-500/30 rounded-lg text-sm text-emerald-400 hover:bg-emerald-600/25 transition-colors disabled:opacity-50"
-        >
-          {creating ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Play className="w-3.5 h-3.5" />
-          )}
-          Start Assessment
-        </button>
-        <button
-          onClick={() => onClone(template.id)}
-          disabled={cloning}
-          className="flex items-center justify-center gap-1 px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-50"
-          title="Clone as custom template"
-        >
-          {cloning ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Copy className="w-3.5 h-3.5" />
-          )}
-        </button>
-        <button
-          onClick={() => onPreview(template.id)}
-          className="flex items-center justify-center px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-          title="Preview questions"
-        >
-          <ChevronDown className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function TemplatePreviewModal({
-  template,
-  onClose,
-  onCreate,
-  creating,
-}: {
-  template: Template;
-  onClose: () => void;
-  onCreate: (id: string, name: string) => void;
-  creating: boolean;
-}) {
-  const questions = (template.questions || []) as TemplateQuestion[];
-  const domainGroups = questions.reduce(
-    (acc, q) => {
-      const d = q.domain || "GENERAL";
-      if (!acc[d]) acc[d] = [];
-      acc[d].push(q);
-      return acc;
-    },
-    {} as Record<string, TemplateQuestion[]>,
-  );
+  const groups = [
+    { title: "Built-in frameworks", items: filtered.filter((t) => t.isBuiltIn) },
+    { title: "Your templates", items: filtered.filter((t) => !t.isBuiltIn) },
+  ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="p-5 border-b border-slate-700 flex items-start justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-white">{template.name}</h2>
-            {template.framework && (
-              <span className="inline-block text-xs px-2 py-0.5 mt-1 rounded-full bg-indigo-500/15 text-indigo-400">
-                {template.framework}
-              </span>
-            )}
-            {template.description && (
-              <p className="text-sm text-slate-400 mt-2">
-                {template.description}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+    <>
+      <PageHeader
+        eyebrow="Templates"
+        title="Templates"
+        sub="Start an assessment from a standard framework. Its questions are created already parsed, ready for answer generation."
+      />
 
-        {/* Questions by domain */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {Object.entries(domainGroups).map(([domain, qs]) => (
-            <div key={domain}>
-              <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">
-                {domain.replace(/_/g, " ")} ({qs.length})
-              </h3>
-              <div className="space-y-2">
-                {qs.map((q, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-3 bg-slate-800/40 border border-slate-700/50 rounded-lg p-3"
-                  >
-                    <span className="text-xs text-slate-500 mt-0.5 font-mono min-w-[2rem]">
-                      {idx + 1}.
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-300">{q.text}</p>
-                      <div className="flex gap-2 mt-1">
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
-                          {q.type.replace(/_/g, " ")}
-                        </span>
-                        {q.required && (
-                          <span className="text-xs text-amber-400">
-                            Required
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="relative lg:w-80">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-45" aria-hidden />
+          <input type="search" className="input !pl-10" placeholder="Search templates…" aria-label="Search templates" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by framework">
+          {frameworks.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFramework(f)}
+              aria-pressed={framework === f}
+              className={`btn btn-sm ${framework === f ? "btn-primary" : "btn-ghost"}`}
+            >
+              {f === "all" ? "All" : f}
+            </button>
           ))}
         </div>
+      </div>
 
-        {/* Footer */}
-        <div className="p-5 border-t border-slate-700 flex gap-3">
-          <button
-            onClick={() => onCreate(template.id, template.name)}
-            disabled={creating}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {creating ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-            Start Assessment ({questions.length} questions)
+      {filtered.length === 0 && <EmptyState title="No templates match" text="Clear the search or pick another framework." />}
+
+      {groups.map(
+        (g) =>
+          g.items.length > 0 && (
+            <section key={g.title} className="mb-6">
+              <h2 className="eyebrow mb-3">
+                {g.title} ({g.items.length})
+              </h2>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {g.items.map((t) => (
+                  <article key={t.id} className="card flex flex-col p-[18px]">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <h3 className="min-w-0 font-bold">{t.name}</h3>
+                      {t.framework && <span className="badge b-blue shrink-0">{t.framework}</span>}
+                    </div>
+                    {t.description && <p className="mb-3 line-clamp-2 text-[13px] text-ink-65">{t.description}</p>}
+                    <p className="mt-auto mb-4 font-mono text-xs text-ink-65">
+                      {t.questionCount} questions · {t.domains.length} domains · v{t.version}
+                    </p>
+                    <div className="flex gap-2">
+                      <button type="button" className="btn btn-primary btn-sm flex-1" onClick={() => start(t)} disabled={!!busy}>
+                        {busy === `start-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
+                        Start assessment
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => openPreview(t.id)} disabled={!!busy} aria-label={`Preview ${t.name}`} title="Preview questions">
+                        {busy === `preview-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => clone(t)} disabled={!!busy} aria-label={`Copy ${t.name} to your templates`} title="Copy to your templates">
+                        {busy === `clone-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ),
+      )}
+
+      {preview && <PreviewModal template={preview} busy={busy} onClose={() => setPreview(null)} onStart={() => start(preview)} />}
+    </>
+  );
+}
+
+function PreviewModal({
+  template,
+  busy,
+  onClose,
+  onStart,
+}: {
+  template: Template;
+  busy: string | null;
+  onClose: () => void;
+  onStart: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const questions = template.questions ?? [];
+  const groups = questions.reduce<Record<string, TemplateQuestion[]>>((acc, q) => {
+    (acc[q.domain || "GENERAL"] ??= []).push(q);
+    return acc;
+  }, {});
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tpl-title"
+        className="glass flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden !bg-canvas/95"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line p-5">
+          <div className="min-w-0">
+            <h2 id="tpl-title" className="!text-lg">
+              {template.name}
+            </h2>
+            {template.description && <p className="mt-1 text-[13px] text-ink-65">{template.description}</p>}
+          </div>
+          <button type="button" className="theme-btn !px-2" onClick={onClose} aria-label="Close preview" autoFocus>
+            <X aria-hidden />
           </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm transition-colors"
-          >
+        </div>
+        <div className="grid gap-5 overflow-y-auto p-5">
+          {Object.entries(groups).map(([domain, qs]) => (
+            <section key={domain}>
+              <h3 className="eyebrow mb-2 !text-accent">
+                {domainLabel(domain)} ({qs.length})
+              </h3>
+              <ol className="grid gap-2">
+                {qs.map((q, i) => (
+                  <li key={i} className="card flex gap-3 p-3 text-[13px]">
+                    <span className="font-mono text-ink-45">{i + 1}.</span>
+                    <span className="min-w-0">
+                      {q.text}
+                      <span className="mt-1 flex gap-2 text-xs text-ink-65">
+                        <span>{typeLabel(q.type)}</span>
+                        {q.required && <span className="text-amber">required</span>}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+        <div className="flex gap-2 border-t border-line p-4">
+          <button type="button" className="btn btn-primary flex-1" onClick={onStart} disabled={!!busy}>
+            {busy === `start-${template.id}` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+            Start assessment ({questions.length} questions)
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
             Close
           </button>
         </div>
