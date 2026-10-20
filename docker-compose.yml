@@ -1,15 +1,20 @@
 # =============================================================================
-# CompliBot - Docker Compose Configuration
+# CompliBot - Docker Compose
 # =============================================================================
-# Ports: App 3005, PostgreSQL 5437, Redis 6384
-# Network: 172.38.0.0/24
+#   docker compose up -d --build
+#
+# Host ports (all bound to 127.0.0.1, override in .env):
+#   app        COMPLIBOT_PORT        default 3005
+#   postgres   COMPLIBOT_DB_PORT     default 5437  (only needed for npm run dev)
+#   redis      COMPLIBOT_REDIS_PORT  default 6384  (only needed for npm run dev)
+#
+# No container_name / fixed IPs: `docker compose -p <name>` namespaces
+# containers, network and volumes, so several copies can run side by side.
 # =============================================================================
 
 services:
   complibot-postgres:
-    image: pgvector/pgvector:0.8.2-pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc # pgvector 0.8.2 (CVE-2026-3172, bumped 2026-06-06)
-    container_name: complibot-postgres
-    hostname: complibot-postgres
+    image: pgvector/pgvector:0.8.2-pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -24,21 +29,18 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
       POSTGRES_DB: complibot
-      # App-specific user password (least-privilege — must be set separately)
+      # Least-privilege application role, created by postgres/init-user.sh
       COMPLIBOT_DB_PASSWORD: ${COMPLIBOT_DB_PASSWORD:?COMPLIBOT_DB_PASSWORD required in .env}
     ports:
-      - "127.0.0.1:5437:5432"
+      - "127.0.0.1:${COMPLIBOT_DB_PORT:-5437}:5432"
     volumes:
-      - complibot-postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
       - ./postgres/init-user.sh:/docker-entrypoint-initdb.d/10-init-user.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d complibot"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      complibot-network:
-        ipv4_address: 172.38.0.10
+      retries: 10
     restart: "no"
     stop_grace_period: 30s
     deploy:
@@ -47,19 +49,14 @@ services:
           memory: 512M
           cpus: "0.5"
           pids: 200
-        reservations:
-          memory: 256M
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
-        compress: "true"
 
   complibot-redis:
     image: redis:8.10.0-alpine@sha256:978f0e01593e65eed801f2402944efcd936d43b5027e4908a7897baf88ed6241
-    container_name: complibot-redis
-    hostname: complibot-redis
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -70,20 +67,17 @@ services:
       - SETGID
       - DAC_OVERRIDE
     ports:
-      - "127.0.0.1:6384:6379"
+      - "127.0.0.1:${COMPLIBOT_REDIS_PORT:-6384}:6379"
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}
     volumes:
-      - complibot-redis-data:/data
+      - redis-data:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      complibot-network:
-        ipv4_address: 172.38.0.11
+      retries: 10
     restart: "no"
     stop_grace_period: 30s
     deploy:
@@ -92,23 +86,43 @@ services:
           memory: 256M
           cpus: "0.5"
           pids: 200
-        reservations:
-          memory: 128M
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
-        compress: "true"
+
+  # One-shot: applies Prisma migrations (incl. pgvector) as the Postgres
+  # superuser, then seeds the demo org/users/knowledge base. Safe to re-run:
+  #   docker compose run --rm complibot-init
+  complibot-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: init
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}@complibot-postgres:5432/complibot
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      complibot-postgres:
+        condition: service_healthy
+    restart: "no"
 
   complibot-app:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runner
       args:
         - DOCKER_BUILD=1
-    container_name: complibot-app
-    hostname: complibot-app
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -121,46 +135,37 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - DATABASE_URL=postgresql://complibot:${COMPLIBOT_DB_PASSWORD:?COMPLIBOT_DB_PASSWORD required in .env}@172.38.0.10:5432/complibot
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}@172.38.0.11:6379
-      - REDIS_HOST=172.38.0.11
+      - DATABASE_URL=postgresql://complibot:${COMPLIBOT_DB_PASSWORD:?COMPLIBOT_DB_PASSWORD required in .env}@complibot-postgres:5432/complibot
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}@complibot-redis:6379
+      - REDIS_HOST=complibot-redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}
-      - AUTH_SECRET=${AUTH_SECRET:?AUTH_SECRET required}
-      - NEXTAUTH_URL=http://localhost:3005
+      - AUTH_SECRET=${AUTH_SECRET:?AUTH_SECRET required in .env}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:${COMPLIBOT_PORT:-3005}}
       - AUTH_TRUST_HOST=true
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
-      - CLAUDE_BRIDGE_URL=${CLAUDE_BRIDGE_URL:-http://host.docker.internal:7777}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-opus}
-      - CLAUDE_BRIDGE_TOKEN=${CLAUDE_BRIDGE_TOKEN:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
+      - CLAUDE_BRIDGE_URL=${CLAUDE_BRIDGE_URL:-http://host.docker.internal:7777}
+      - CLAUDE_BRIDGE_TOKEN=${CLAUDE_BRIDGE_TOKEN:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-sonnet}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY required in .env}
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-100}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:3005:3000"
+      - "127.0.0.1:${COMPLIBOT_PORT:-3005}:3000"
     depends_on:
-      complibot-postgres:
-        condition: service_healthy
+      complibot-init:
+        condition: service_completed_successfully
       complibot-redis:
         condition: service_healthy
-    networks:
-      complibot-network:
-        ipv4_address: 172.38.0.12
     restart: "no"
     stop_grace_period: 30s
     healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "-O",
-          "/dev/null",
-          "http://127.0.0.1:3000/api/health",
-        ]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -171,22 +176,12 @@ services:
           memory: 2G
           cpus: "2"
           pids: 200
-        reservations:
-          memory: 1G
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-        compress: "true"
 
 volumes:
-  complibot-postgres-data:
-  complibot-redis-data:
-
-networks:
-  complibot-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.38.0.0/24
+  postgres-data:
+  redis-data:

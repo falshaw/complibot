@@ -17,6 +17,11 @@ const KNOWN_WEAK_SECRETS = [
 ];
 
 function validateAuthSecret(): string {
+  // `next build` imports route modules to collect page data; the real secret
+  // is only needed at runtime, so a build without .env must not fail here.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return process.env.AUTH_SECRET || "build-time-placeholder-not-used-at-runtime";
+  }
   const secret = process.env.AUTH_SECRET;
   if (!secret) {
     throw new Error(
