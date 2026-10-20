@@ -139,7 +139,7 @@ Chat completions (domain classification and answer drafting) go through `src/lib
 
 The bridge is any HTTP service that accepts `POST {CLAUDE_BRIDGE_URL}/generate` with JSON `{prompt, system, model}` (header `X-Bridge-Token` when a token is set) and returns `{ok: true, response: "<text>"}`. Embeddings always stay on Ollama.
 
-Larger models give better answers: `qwen2.5:7b` is a good default for 8 GB of VRAM; 14B to 32B models are noticeably better if you have the memory. Change `OLLAMA_MODEL` in `.env` and run `docker compose up -d` to apply.
+Larger models give better answers: `qwen2.5:7b` is a good default for 8 GB of VRAM; 14B to 32B models are noticeably better if you have the memory. Thinking models work too; complibot sends `reasoning_effort: "none"` so their hidden reasoning does not eat the answer budget (`OLLAMA_REASONING_EFFORT`). Change `OLLAMA_MODEL` in `.env` and run `docker compose up -d` to apply.
 
 ## Embeddings (optional)
 
@@ -200,6 +200,7 @@ See `.env.example` for all variables.
 | `LLM_PROVIDER` | no | `ollama` (default) or `claude` |
 | `OLLAMA_HOST`, `OLLAMA_MODEL` | no | default `http://host.docker.internal:11434`, `qwen2.5:7b` |
 | `EMBEDDING_MODEL` | no | default `nomic-embed-text`; `none` = keyword search only |
+| `OLLAMA_REASONING_EFFORT` | no | default `none`: turns thinking off for reasoning models (gemma4, qwen3, ...), which otherwise spend the token budget on hidden reasoning; empty = parameter not sent |
 | `CLAUDE_BRIDGE_URL`, `CLAUDE_BRIDGE_TOKEN`, `CLAUDE_MODEL` | no | only for `LLM_PROVIDER=claude` |
 | `COMPLIBOT_PORT`, `COMPLIBOT_DB_PORT`, `COMPLIBOT_REDIS_PORT` | no | host ports on 127.0.0.1 (3005, 5437, 6384) |
 | `NEXTAUTH_URL` | no | the URL you open in the browser; keep in sync with `COMPLIBOT_PORT` |
