@@ -26,15 +26,28 @@ const SOURCE_KIND: Record<string, string> = {
  * One knowledge-base excerpt an answer cites, as a dark terminal-style block
  * (dark in both themes). Plain text nodes only, never HTML strings.
  */
-export function CitedEntry({ n, source }: { n: number; source: CitedSource }) {
+export function CitedEntry({
+  n,
+  source,
+  maxHeight,
+}: {
+  n: number;
+  source: CitedSource;
+  maxHeight?: number;
+}) {
   const e = source.knowledgeEntry;
-  const kind = e.source ? (SOURCE_KIND[e.source.sourceType] ?? "source") : "manual entry";
+  const kind = e.source ? (SOURCE_KIND[e.source.sourceType] ?? "source") : "app entry";
   return (
     <figure className="m-0 min-w-0">
       <figcaption className="eyebrow mb-1.5">
         [{n}] Cited entry · {kind}
       </figcaption>
-      <pre className="code wrap m-0" tabIndex={0} aria-label={`Cited entry ${n}`}>
+      <pre
+        className="code wrap m-0"
+        style={maxHeight ? { maxHeight } : undefined}
+        tabIndex={0}
+        aria-label={`Cited entry ${n}`}
+      >
         <span className="c">
           # rank {source.rank + 1} · similarity {source.similarity.toFixed(2)}
         </span>
@@ -44,7 +57,7 @@ export function CitedEntry({ n, source }: { n: number; source: CitedSource }) {
           {e.id}
         </Link>
         {"\n"}
-        <span className="k">source</span>{"  "}<span className="s">{e.source?.name ?? "added by hand"}</span>
+        <span className="k">source</span>{"  "}<span className="s">{e.source?.name ?? "entered in the app"}</span>
         {"\n"}
         <span className="k">domain</span>{"  "}{domainLabel(e.domain)}
         {e.isVerified ? " · verified" : " · not verified"}

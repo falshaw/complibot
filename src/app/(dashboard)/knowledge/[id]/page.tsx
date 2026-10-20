@@ -161,7 +161,7 @@ export default function KnowledgeEntryPage() {
             <dl className="mt-5 grid gap-1 border-t border-line-2 pt-4 text-xs text-ink-65 sm:grid-cols-3">
               <div>
                 <dt className="eyebrow">Source</dt>
-                <dd>{entry.source ? `${entry.source.name} (${entry.source.sourceType.toLowerCase()})` : "Added by hand"}</dd>
+                <dd>{entry.source ? `${entry.source.name} (${entry.source.sourceType.toLowerCase()})` : "Entered in the app"}</dd>
               </div>
               <div>
                 <dt className="eyebrow">Created</dt>

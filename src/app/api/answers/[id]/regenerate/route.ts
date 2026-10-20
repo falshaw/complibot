@@ -20,6 +20,12 @@ export const POST = apiHandler(
       return NextResponse.json({ error: "Answer not found" }, { status: 404 });
     }
 
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { confidenceThreshold: true },
+    });
+    const threshold = org?.confidenceThreshold ?? 0.8;
+
     const { content, confidence, sourceIds } = await generateAnswer(
       existingAnswer.questionId,
       organizationId,
@@ -31,7 +37,8 @@ export const POST = apiHandler(
       data: {
         content,
         confidence,
-        status: "PENDING",
+        // Same rule as the first draft: below the threshold means flagged.
+        status: confidence >= threshold ? "PENDING" : "FLAGGED",
         editedContent: null,
         reviewNote: null,
       },
@@ -57,7 +64,10 @@ export const POST = apiHandler(
       action: "answer.regenerate",
       entityType: "Answer",
       entityId: answer.id,
-      details: { confidence, sources: sourceIds.length },
+      details: {
+        confidence: Math.round(confidence * 100) / 100,
+        sources: sourceIds.length,
+      },
       req,
     });
 

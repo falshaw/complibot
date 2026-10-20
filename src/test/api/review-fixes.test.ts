@@ -13,8 +13,9 @@ import { NextRequest } from "next/server";
 const db = {
   interviewSession: { findFirst: vi.fn(), update: vi.fn() },
   knowledgeEntry: { findFirst: vi.fn(), delete: vi.fn(() => "kb-delete") },
-  answerSource: { deleteMany: vi.fn(() => "sources-delete") },
   answer: { findFirst: vi.fn(), update: vi.fn(), count: vi.fn() },
+  answerSource: { deleteMany: vi.fn(() => "sources-delete"), createMany: vi.fn() },
+  organization: { findUnique: vi.fn(async () => ({ confidenceThreshold: 0.8 })) },
   question: { count: vi.fn() },
   questionnaire: { update: vi.fn() },
   auditLog: { create: vi.fn() },
@@ -26,6 +27,10 @@ vi.mock("@/lib/session", () => ({
   getSession: vi.fn(async () => ({
     user: { id: "u-1", role: "ADMIN", organizationId: "org-1", email: "a@x.test" },
   })),
+}));
+const generateAnswer = vi.fn();
+vi.mock("@/lib/services/AnswerGenerationService", () => ({
+  generateAnswer: (...a: unknown[]) => generateAnswer(...a),
 }));
 vi.mock("@/lib/rateLimit", () => ({
   applyRateLimit: vi.fn(async () => null),
@@ -126,6 +131,24 @@ describe("review actions", () => {
 
     expect(db.questionnaire.update).toHaveBeenCalled();
     expect(db.auditLog.create.mock.calls[0][0].data.action).toBe("answer.approve");
+  });
+});
+
+describe("regenerate", () => {
+  it("flags a new draft below the confidence threshold, like the first draft", async () => {
+    db.answer.findFirst.mockResolvedValue({ id: "a-1", questionId: "q-1", question: { questionnaireId: "qn-1" } });
+    db.answer.update.mockImplementation(async ({ data }) => ({ id: "a-1", ...data }));
+    db.question.count.mockResolvedValue(1);
+    db.answer.count.mockResolvedValue(0);
+    const { POST } = await import("@/app/api/answers/[id]/regenerate/route");
+
+    generateAnswer.mockResolvedValueOnce({ content: "Yes.", confidence: 0.39, sourceIds: [] });
+    await POST(req("/api/answers/a-1/regenerate", { method: "POST" }), ctx("a-1"));
+    expect(db.answer.update.mock.calls[0][0].data.status).toBe("FLAGGED");
+
+    generateAnswer.mockResolvedValueOnce({ content: "Yes.", confidence: 0.91, sourceIds: [] });
+    await POST(req("/api/answers/a-1/regenerate", { method: "POST" }), ctx("a-1"));
+    expect(db.answer.update.mock.calls[1][0].data.status).toBe("PENDING");
   });
 });
 

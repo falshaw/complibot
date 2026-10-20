@@ -450,16 +450,6 @@ export default function QuestionnaireReviewPage() {
                     )}
                   </div>
 
-                  {answer.sources.length > 0 ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {answer.sources.map((s, i) => (
-                        <CitedEntry key={s.id} n={i + 1} source={s} />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[13px] text-ink-65">No knowledge-base entries cited.</p>
-                  )}
-
                   {!editMode && (
                     <div className="flex flex-wrap justify-end gap-2">
                       <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={!!busy}>
@@ -485,6 +475,17 @@ export default function QuestionnaireReviewPage() {
                       </button>
                     </div>
                   )}
+
+                  {answer.sources.length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {answer.sources.map((s, i) => (
+                        <CitedEntry key={s.id} n={i + 1} source={s} maxHeight={230} />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[13px] text-ink-65">No knowledge-base entries cited.</p>
+                  )}
+
                 </>
               )}
 
