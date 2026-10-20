@@ -295,10 +295,22 @@ export async function generateAnswer(
  *      findUniqueOrThrow calls.
  *   2. Domain entry counts are prefetched in a single groupBy query instead
  *      of one COUNT per question.
- *   3. Answer generation calls run with bounded concurrency (5 in-flight at
- *      once) via mapWithConcurrency — serial DB writes still happen per
+ *   3. Answer generation calls run with bounded concurrency (see
+ *      generationConcurrency) via mapWithConcurrency — serial DB writes still happen per
  *      answer to preserve atomicity, but LLM calls and hybridSearch overlap.
  */
+/**
+ * How many answers to draft in parallel. LLM_CONCURRENCY overrides; otherwise
+ * 1 for Ollama (one local model) and 5 for the HTTP bridge.
+ */
+export function generationConcurrency(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const explicit = parseInt(env.LLM_CONCURRENCY ?? "", 10);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(explicit, 10);
+  return (env.LLM_PROVIDER ?? "ollama").toLowerCase() === "claude" ? 5 : 1;
+}
+
 export async function generateQuestionnaireAnswers(
   questionnaireId: string,
   organizationId: string,
@@ -321,8 +333,10 @@ export async function generateQuestionnaireAnswers(
   let lastError: string | undefined;
 
   try {
+    // Only questions without a draft: a re-run after a partial failure (or
+    // after an interrupted run) fills the gaps instead of duplicating answers.
     const questions = await prisma.question.findMany({
-      where: { questionnaireId },
+      where: { questionnaireId, answers: { none: {} } },
       orderBy: { rowIndex: "asc" },
     });
 
@@ -337,9 +351,10 @@ export async function generateQuestionnaireAnswers(
       domainCountRows.map((r) => [r.domain, r._count.id]),
     );
 
-    // Bounded-concurrency generation — cap at 5 in-flight to avoid
-    // overwhelming Ollama/bridge while still parallelising the slow LLM calls.
-    const CONCURRENCY = 5;
+    // Bounded concurrency. A local Ollama model answers one request at a time
+    // anyway; queueing several only makes the later ones wait (and time out)
+    // and adds memory pressure, so the default there is 1.
+    const CONCURRENCY = generationConcurrency();
 
     // We need the DB writes (answer.create, answerSource.createMany) to be
     // accounted correctly even when tasks overlap, so we use a shared counter
@@ -381,6 +396,11 @@ export async function generateQuestionnaireAnswers(
         }
 
         generated++;
+        // Live progress for the review page while the run continues.
+        await prisma.questionnaire.update({
+          where: { id: questionnaireId },
+          data: { answeredCount: { increment: 1 } },
+        });
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         logger.error("Failed to generate answer", {
@@ -403,12 +423,15 @@ export async function generateQuestionnaireAnswers(
   // Only move to review when at least one answer exists. With zero answers
   // (LLM down, model not pulled, ...) the questionnaire goes back to PARSED
   // so "Generate Answers" can simply be run again.
+  const answered = await prisma.question.count({
+    where: { questionnaireId, answers: { some: {} } },
+  });
   await prisma.questionnaire.update({
     where: { id: questionnaireId },
     data:
-      generated > 0
-        ? { status: "IN_REVIEW", answeredCount: generated }
-        : { status: "PARSED" },
+      answered > 0
+        ? { status: "IN_REVIEW", answeredCount: answered }
+        : { status: "PARSED", answeredCount: 0 },
   });
 
   return { generated, errors, lastError };

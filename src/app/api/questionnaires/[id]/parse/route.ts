@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import {
@@ -10,7 +11,7 @@ import { RATE_LIMITS } from "@/lib/rateLimit";
 
 // POST /api/questionnaires/[id]/parse - Trigger parsing
 export const POST = apiHandler(
-  async ({ req, params, organizationId }) => {
+  async ({ req, params, user, organizationId }) => {
     const questionnaire = await prisma.questionnaire.findUnique({
       where: { id: params.id, organizationId },
     });
@@ -66,6 +67,16 @@ export const POST = apiHandler(
       }
       throw error;
     }
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "questionnaire.parse",
+      entityType: "Questionnaire",
+      entityId: questionnaire.id,
+      details: { questionCount: result.questionCount },
+      req,
+    });
 
     return NextResponse.json({
       message: "Parsing complete",

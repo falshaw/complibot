@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 
 // GET /api/team/members — list org members
@@ -36,7 +37,7 @@ const updateSchema = z.object({
 });
 
 export const PUT = apiHandler(
-  async ({ body, user, organizationId }) => {
+  async ({ req, body, user, organizationId }) => {
     if (user.role !== "ADMIN") {
       return NextResponse.json(
         { error: "Admin access required" },
@@ -65,6 +66,16 @@ export const PUT = apiHandler(
         ...(body.isActive !== undefined && { isActive: body.isActive }),
       },
       select: { id: true, email: true, name: true, role: true, isActive: true },
+    });
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "team.member_update",
+      entityType: "User",
+      entityId: updated.id,
+      details: { role: body.role, isActive: body.isActive },
+      req,
     });
 
     return NextResponse.json(updated);
@@ -105,6 +116,15 @@ export const DELETE = apiHandler(
     await prisma.user.update({
       where: { id: userId },
       data: { isActive: false },
+    });
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "team.member_remove",
+      entityType: "User",
+      entityId: userId,
+      details: { email: target.email },
+      req,
     });
 
     return NextResponse.json({ success: true });

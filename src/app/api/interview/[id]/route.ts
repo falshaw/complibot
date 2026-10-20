@@ -128,9 +128,9 @@ const DOMAIN_QUESTIONS: Record<string, string[]> = {
 };
 
 // GET /api/interview/[id] - Get interview state (transformed for frontend)
-export const GET = apiHandler(async ({ params }) => {
-  const session = await prisma.interviewSession.findUnique({
-    where: { id: params.id },
+export const GET = apiHandler(async ({ params, organizationId }) => {
+  const session = await prisma.interviewSession.findFirst({
+    where: { id: params.id, organizationId },
   });
 
   if (!session) {

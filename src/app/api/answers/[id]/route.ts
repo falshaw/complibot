@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
+import { audit } from "@/lib/audit";
 
 const updateAnswerSchema = z.object({
   editedContent: z.string().min(1).max(10000).optional(),
@@ -33,7 +34,7 @@ export const GET = apiHandler(async ({ params, organizationId }) => {
 
 // PATCH /api/answers/[id] - Edit answer
 export const PATCH = apiHandler(
-  async ({ body, params, user, organizationId }) => {
+  async ({ req, body, params, user, organizationId }) => {
     const existing = await prisma.answer.findFirst({
       where: {
         id: params.id,
@@ -53,6 +54,15 @@ export const PATCH = apiHandler(
         reviewNote: body.reviewNote,
         reviewedById: user.id,
       },
+    });
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "answer.edit",
+      entityType: "Answer",
+      entityId: answer.id,
+      req,
     });
 
     return NextResponse.json(answer);

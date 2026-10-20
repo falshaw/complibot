@@ -5,6 +5,7 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 
@@ -19,7 +20,7 @@ const fromTemplateSchema = z.object({
  * Skips the file upload + parse step entirely.
  */
 export const POST = apiHandler(
-  async ({ body, organizationId }) => {
+  async ({ req, body, user, organizationId }) => {
     const template = await prisma.questionnaireTemplate.findFirst({
       where: {
         id: body.templateId,
@@ -74,6 +75,16 @@ export const POST = apiHandler(
         questionType: (q.type || "FREE_TEXT") as never,
         domain: (q.domain || "GENERAL") as never,
       })),
+    });
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "questionnaire.from_template",
+      entityType: "Questionnaire",
+      entityId: questionnaire.id,
+      details: { template: template.name, questions: questions.length },
+      req,
     });
 
     return NextResponse.json(

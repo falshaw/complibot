@@ -172,6 +172,13 @@ export async function startInterview(
 /**
  * Process a user response in the interview and return the next question
  */
+/** The UI's "skip" button sends this; it must never become a KB entry. */
+export const SKIP_RESPONSE = "Skip this question";
+
+export function isSkipResponse(text: string): boolean {
+  return /^(skip|skip this question|n\/a|pass)\.?$/i.test(text.trim());
+}
+
 export async function processResponse(
   sessionId: string,
   userResponse: string,
@@ -204,7 +211,11 @@ export async function processResponse(
 
   // Create KB entry from the Q&A pair
   let entriesCreated = 0;
-  if (lastQuestion && userResponse.trim().length > 10) {
+  if (
+    lastQuestion &&
+    userResponse.trim().length > 10 &&
+    !isSkipResponse(userResponse)
+  ) {
     // Use GPT to extract a clean Q&A pair
     const extraction = await ollamaChatWithBreaker({
       model: OLLAMA_MODEL,

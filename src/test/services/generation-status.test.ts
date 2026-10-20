@@ -11,6 +11,7 @@ import * as path from "path";
 
 const questionnaireUpdate = vi.fn();
 const questionFindMany = vi.fn();
+const questionCount = vi.fn();
 const questionCreateMany = vi.fn();
 const answerCreate = vi.fn();
 const chat = vi.fn();
@@ -23,6 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     questionnaire: { update: (...a: unknown[]) => questionnaireUpdate(...a) },
     question: {
       findMany: (...a: unknown[]) => questionFindMany(...a),
+      count: (...a: unknown[]) => questionCount(...a),
       createMany: (...a: unknown[]) => questionCreateMany(...a),
     },
     knowledgeEntry: {
@@ -64,6 +66,7 @@ afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 beforeEach(() => {
   vi.clearAllMocks();
   questionFindMany.mockResolvedValue(QUESTIONS);
+  questionCount.mockResolvedValue(0);
   answerCreate.mockImplementation(async ({ data }) => ({ id: `a-${data.questionId}` }));
 });
 
@@ -79,13 +82,14 @@ describe("generateQuestionnaireAnswers status", () => {
     expect(result.generated).toBe(0);
     expect(result.errors).toBe(2);
     expect(result.lastError).toContain("not found");
-    expect(lastStatusUpdate()).toEqual({ status: "PARSED" });
+    expect(lastStatusUpdate()).toEqual({ status: "PARSED", answeredCount: 0 });
   });
 
   it("moves to IN_REVIEW when at least one answer was generated", async () => {
     chat
       .mockResolvedValueOnce({ choices: [{ message: { content: "Yes." } }] })
       .mockRejectedValueOnce(new Error("timeout"));
+    questionCount.mockResolvedValue(1);
     const { generateQuestionnaireAnswers } = await import(
       "@/lib/services/AnswerGenerationService"
     );
@@ -94,6 +98,70 @@ describe("generateQuestionnaireAnswers status", () => {
 
     expect(result.generated).toBe(1);
     expect(lastStatusUpdate()).toEqual({ status: "IN_REVIEW", answeredCount: 1 });
+  });
+
+  it("only drafts questions that have no answer yet (retry fills gaps)", async () => {
+    chat.mockResolvedValue({ choices: [{ message: { content: "Yes." } }] });
+    const { generateQuestionnaireAnswers } = await import(
+      "@/lib/services/AnswerGenerationService"
+    );
+
+    await generateQuestionnaireAnswers("qn-1", "org-1");
+
+    expect(questionFindMany.mock.calls[0][0].where).toEqual({
+      questionnaireId: "qn-1",
+      answers: { none: {} },
+    });
+  });
+
+  it("reports progress after every drafted answer", async () => {
+    chat.mockResolvedValue({ choices: [{ message: { content: "Yes." } }] });
+    const { generateQuestionnaireAnswers } = await import(
+      "@/lib/services/AnswerGenerationService"
+    );
+
+    await generateQuestionnaireAnswers("qn-1", "org-1");
+
+    const increments = questionnaireUpdate.mock.calls.filter(
+      (c) => c[0].data.answeredCount?.increment === 1,
+    );
+    expect(increments).toHaveLength(2);
+  });
+});
+
+describe("generationConcurrency", () => {
+  it("drafts one answer at a time on a local Ollama model", async () => {
+    const { generationConcurrency } = await import(
+      "@/lib/services/AnswerGenerationService"
+    );
+    expect(generationConcurrency({})).toBe(1);
+    expect(generationConcurrency({ LLM_PROVIDER: "ollama" })).toBe(1);
+    expect(generationConcurrency({ LLM_PROVIDER: "claude" })).toBe(5);
+    expect(generationConcurrency({ LLM_CONCURRENCY: "3" })).toBe(3);
+    expect(generationConcurrency({ LLM_CONCURRENCY: "x" })).toBe(1);
+  });
+});
+
+describe("canStartGeneration", () => {
+  const base = { totalQuestions: 4, answeredCount: 0, updatedAt: new Date(0) };
+  it("starts a parsed questionnaire and fills gaps of a partial run", async () => {
+    const { canStartGeneration } = await import("@/lib/services/generationGate");
+    expect(canStartGeneration({ ...base, status: "PARSED" })).toBe(true);
+    expect(canStartGeneration({ ...base, status: "IN_REVIEW", answeredCount: 3 })).toBe(true);
+    expect(canStartGeneration({ ...base, status: "IN_REVIEW", answeredCount: 4 })).toBe(false);
+    expect(canStartGeneration({ ...base, status: "UPLOADED" })).toBe(false);
+    expect(canStartGeneration({ ...base, status: "PARSED", totalQuestions: 0 })).toBe(false);
+  });
+
+  it("recovers a run that stopped making progress, not a live one", async () => {
+    const { canStartGeneration, STALE_GENERATION_MS } = await import(
+      "@/lib/services/generationGate"
+    );
+    const now = 10 * STALE_GENERATION_MS;
+    const live = { ...base, status: "GENERATING", updatedAt: new Date(now - 60_000) };
+    const stale = { ...base, status: "GENERATING", updatedAt: new Date(now - STALE_GENERATION_MS - 1) };
+    expect(canStartGeneration(live, now)).toBe(false);
+    expect(canStartGeneration(stale, now)).toBe(true);
   });
 });
 

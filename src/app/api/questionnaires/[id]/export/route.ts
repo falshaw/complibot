@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 import { exportToExcel } from "@/lib/services/ExportService";
 import prisma from "@/lib/prisma";
 import * as fs from "fs";
 
 // POST /api/questionnaires/[id]/export?format=xlsx|pdf|txt - Export questionnaire
-export const POST = apiHandler(async ({ params, organizationId, req }) => {
+export const POST = apiHandler(async ({ params, user, organizationId, req }) => {
   const format = new URL(req.url).searchParams.get("format") || "xlsx";
 
   if (format === "xlsx") {
@@ -14,6 +15,16 @@ export const POST = apiHandler(async ({ params, organizationId, req }) => {
       organizationId,
     );
     const fileBuffer = fs.readFileSync(filePath);
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "questionnaire.export",
+      entityType: "Questionnaire",
+      entityId: params.id,
+      details: { format: "xlsx", fileName },
+      req,
+    });
+
     return new NextResponse(fileBuffer, {
       headers: {
         "Content-Type":
@@ -135,6 +146,16 @@ export const POST = apiHandler(async ({ params, organizationId, req }) => {
   const content = sections.join("\n");
   const safeName = questionnaire.name.replace(/[^a-zA-Z0-9]/g, "_");
   const filename = `${safeName}_report_${date}.txt`;
+
+  await audit({
+    organizationId,
+    userId: user.id,
+    action: "questionnaire.export",
+    entityType: "Questionnaire",
+    entityId: params.id,
+    details: { format, fileName: filename },
+    req,
+  });
 
   return new NextResponse(content, {
     status: 200,
