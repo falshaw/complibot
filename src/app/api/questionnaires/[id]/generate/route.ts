@@ -18,6 +18,13 @@ export const POST = apiHandler(
       );
     }
 
+    if (questionnaire.totalQuestions === 0) {
+      return NextResponse.json(
+        { error: "Questionnaire has no questions. Parse it first." },
+        { status: 400 },
+      );
+    }
+
     if (questionnaire.status !== "PARSED") {
       return NextResponse.json(
         {
@@ -31,6 +38,20 @@ export const POST = apiHandler(
       questionnaire.id,
       organizationId,
     );
+
+    if (result.generated === 0) {
+      return NextResponse.json(
+        {
+          error:
+            `No answers could be generated (${result.errors} failed${result.lastError ? `: ${result.lastError}` : ""}). ` +
+            "Check that the LLM provider is reachable and the model in OLLAMA_MODEL is pulled. " +
+            "The questionnaire is still in PARSED status, so you can retry.",
+          generated: 0,
+          errors: result.errors,
+        },
+        { status: 502 },
+      );
+    }
 
     return NextResponse.json({
       message: "Answer generation complete",

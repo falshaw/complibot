@@ -304,7 +304,7 @@ export async function generateAnswer(
 export async function generateQuestionnaireAnswers(
   questionnaireId: string,
   organizationId: string,
-): Promise<{ generated: number; errors: number }> {
+): Promise<{ generated: number; errors: number; lastError?: string }> {
   // Fetch org confidence threshold (CB-06)
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
@@ -318,86 +318,100 @@ export async function generateQuestionnaireAnswers(
     data: { status: "GENERATING" },
   });
 
-  const questions = await prisma.question.findMany({
-    where: { questionnaireId },
-    orderBy: { rowIndex: "asc" },
-  });
-
-  // Batch-prefetch per-domain knowledge entry counts in a single query.
-  // groupBy returns one row per distinct domain value for this org.
-  const domainCountRows = await prisma.knowledgeEntry.groupBy({
-    by: ["domain"],
-    where: { organizationId },
-    _count: { id: true },
-  });
-  const domainCountMap = new Map<SecurityDomain, number>(
-    domainCountRows.map((r) => [r.domain, r._count.id]),
-  );
-
-  // Bounded-concurrency generation — cap at 5 in-flight to avoid
-  // overwhelming Ollama/bridge while still parallelising the slow LLM calls.
-  const CONCURRENCY = 5;
-
   let generated = 0;
   let errors = 0;
+  let lastError: string | undefined;
 
-  // We need the DB writes (answer.create, answerSource.createMany) to be
-  // accounted correctly even when tasks overlap, so we use a shared counter
-  // updated atomically after each task resolves.
-  await mapWithConcurrency(questions, CONCURRENCY, async (question) => {
-    try {
-      const domainEntryCount = domainCountMap.get(question.domain) ?? 0;
-      const { content, confidence, sourceIds } = await generateAnswer(
-        question.id,
-        organizationId,
-        { question, domainEntryCount },
-      );
+  try {
+    const questions = await prisma.question.findMany({
+      where: { questionnaireId },
+      orderBy: { rowIndex: "asc" },
+    });
 
-      const answer = await prisma.answer.create({
-        data: {
-          questionId: question.id,
-          content,
-          confidence,
-          aiGenerated: true,
-          status:
-            confidence >= threshold
-              ? "PENDING"
-              : confidence >= threshold * 0.625
-                ? "FLAGGED"
-                : "FLAGGED",
-        },
-      });
+    // Batch-prefetch per-domain knowledge entry counts in a single query.
+    // groupBy returns one row per distinct domain value for this org.
+    const domainCountRows = await prisma.knowledgeEntry.groupBy({
+      by: ["domain"],
+      where: { organizationId },
+      _count: { id: true },
+    });
+    const domainCountMap = new Map<SecurityDomain, number>(
+      domainCountRows.map((r) => [r.domain, r._count.id]),
+    );
 
-      // Create source attributions
-      if (sourceIds.length > 0) {
-        await prisma.answerSource.createMany({
-          data: sourceIds.map((s) => ({
-            answerId: answer.id,
-            knowledgeEntryId: s.id,
-            similarity: s.similarity,
-            rank: sourceIds.indexOf(s),
-          })),
+    // Bounded-concurrency generation — cap at 5 in-flight to avoid
+    // overwhelming Ollama/bridge while still parallelising the slow LLM calls.
+    const CONCURRENCY = 5;
+
+    // We need the DB writes (answer.create, answerSource.createMany) to be
+    // accounted correctly even when tasks overlap, so we use a shared counter
+    // updated atomically after each task resolves.
+    await mapWithConcurrency(questions, CONCURRENCY, async (question) => {
+      try {
+        const domainEntryCount = domainCountMap.get(question.domain) ?? 0;
+        const { content, confidence, sourceIds } = await generateAnswer(
+          question.id,
+          organizationId,
+          { question, domainEntryCount },
+        );
+
+        const answer = await prisma.answer.create({
+          data: {
+            questionId: question.id,
+            content,
+            confidence,
+            aiGenerated: true,
+            status:
+              confidence >= threshold
+                ? "PENDING"
+                : confidence >= threshold * 0.625
+                  ? "FLAGGED"
+                  : "FLAGGED",
+          },
         });
+
+        // Create source attributions
+        if (sourceIds.length > 0) {
+          await prisma.answerSource.createMany({
+            data: sourceIds.map((s) => ({
+              answerId: answer.id,
+              knowledgeEntryId: s.id,
+              similarity: s.similarity,
+              rank: sourceIds.indexOf(s),
+            })),
+          });
+        }
+
+        generated++;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        logger.error("Failed to generate answer", {
+          questionId: question.id,
+          error: lastError,
+        });
+        errors++;
       }
+    });
+  } catch (error) {
+    // Unexpected failure outside a single question: put the questionnaire
+    // back so generation can be retried.
+    await prisma.questionnaire.update({
+      where: { id: questionnaireId },
+      data: { status: "PARSED" },
+    });
+    throw error;
+  }
 
-      generated++;
-    } catch (error) {
-      logger.error("Failed to generate answer", {
-        questionId: question.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      errors++;
-    }
-  });
-
-  // Update questionnaire status
+  // Only move to review when at least one answer exists. With zero answers
+  // (LLM down, model not pulled, ...) the questionnaire goes back to PARSED
+  // so "Generate Answers" can simply be run again.
   await prisma.questionnaire.update({
     where: { id: questionnaireId },
-    data: {
-      status: "IN_REVIEW",
-      answeredCount: generated,
-    },
+    data:
+      generated > 0
+        ? { status: "IN_REVIEW", answeredCount: generated }
+        : { status: "PARSED" },
   });
 
-  return { generated, errors };
+  return { generated, errors, lastError };
 }
