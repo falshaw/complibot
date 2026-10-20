@@ -9,7 +9,7 @@ export default function QuestionnaireUploadPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
-  const [questionCol, setQuestionCol] = useState("B");
+  const [questionCol, setQuestionCol] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleUpload() {
@@ -19,7 +19,10 @@ export default function QuestionnaireUploadPage() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("name", name);
-    formData.append("columnMapping", JSON.stringify({ questionCol }));
+    // Empty = let the server detect the question column.
+    if (questionCol.trim()) {
+      formData.append("columnMapping", JSON.stringify({ questionCol }));
+    }
 
     try {
       const res = await fetch("/api/questionnaires", {
@@ -112,10 +115,11 @@ export default function QuestionnaireUploadPage() {
             onChange={(e) => setQuestionCol(e.target.value.toUpperCase())}
             maxLength={2}
             className="w-24 px-3 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-white text-sm"
-            placeholder="B"
+            placeholder="auto"
           />
           <p className="text-xs text-slate-500 mt-1">
-            Which column contains the questions?
+            Column letter with the questions. Leave empty to detect it from a
+            &quot;Question&quot; header or the content.
           </p>
         </div>
 

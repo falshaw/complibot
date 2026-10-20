@@ -8,9 +8,10 @@ import Papa from "papaparse";
 import prisma from "@/lib/prisma";
 import { classifyDomain, detectQuestionType } from "./AnswerGenerationService";
 import { logger } from "@/lib/logger";
+import { detectQuestionColumn } from "./columnDetection";
 import * as fs from "fs";
 
-interface ColumnMapping {
+export interface ColumnMapping {
   questionCol: string; // e.g. "B"
   answerCol?: string; // e.g. "C" (for KB import)
   sheetName?: string;
@@ -49,7 +50,7 @@ export async function parseExcel(
   if (!sheet) throw new Error("Worksheet not found");
 
   const questions: ParsedQuestion[] = [];
-  const headerRow = mapping.headerRow || 1;
+  const headerRow = mapping.headerRow ?? 1;
   const questionColNum = columnToNumber(mapping.questionCol);
   const answerColNum = mapping.answerCol
     ? columnToNumber(mapping.answerCol)
@@ -99,7 +100,7 @@ export async function parseCSV(
   const result = Papa.parse(content, { header: false, skipEmptyLines: true });
 
   const questions: ParsedQuestion[] = [];
-  const headerRow = mapping.headerRow || 1;
+  const headerRow = mapping.headerRow ?? 1;
   const questionColIdx = columnToNumber(mapping.questionCol) - 1;
   const answerColIdx = mapping.answerCol
     ? columnToNumber(mapping.answerCol) - 1
@@ -127,12 +128,75 @@ export async function parseCSV(
 }
 
 /**
- * Parse a questionnaire file and create Question records
+ * Read the first sheet (or `sheetName`) / the CSV as a matrix of strings.
+ */
+export async function readRows(
+  filePath: string,
+  sheetName?: string,
+): Promise<string[][]> {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const result = Papa.parse(content, { header: false, skipEmptyLines: true });
+    return result.data as string[][];
+  }
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  const sheet = sheetName
+    ? workbook.getWorksheet(sheetName)
+    : workbook.worksheets[0];
+  if (!sheet) throw new QuestionnaireParseError("Worksheet not found");
+  const rows: string[][] = [];
+  sheet.eachRow((row) => {
+    const cells: string[] = [];
+    for (let col = 1; col <= row.cellCount; col++) {
+      cells.push(cellToString(row.getCell(col)));
+    }
+    rows.push(cells);
+  });
+  return rows;
+}
+
+/**
+ * Fill in the question column (and header row) when no columnMapping was
+ * given, by header name or by content. See columnDetection.ts.
+ */
+export async function resolveColumnMapping(
+  filePath: string,
+  mapping: Partial<ColumnMapping>,
+): Promise<ColumnMapping> {
+  if (mapping.questionCol) {
+    const questionCol = mapping.questionCol.trim().toUpperCase();
+    if (!/^[A-Z]{1,3}$/.test(questionCol)) {
+      throw new QuestionnaireParseError(
+        `Invalid questionCol "${mapping.questionCol}": use a column letter such as "A" or "B".`,
+      );
+    }
+    return { ...mapping, questionCol };
+  }
+
+  const rows = await readRows(filePath, mapping.sheetName);
+  const detected = detectQuestionColumn(rows);
+  if (!detected) {
+    throw new QuestionnaireParseError(
+      'Could not find a question column. Name its header "Question" or pass a columnMapping such as {"questionCol":"B","headerRow":1}.',
+    );
+  }
+  logger.info("Question column detected", { ...detected });
+  return {
+    ...mapping,
+    questionCol: detected.questionCol,
+    headerRow: mapping.headerRow ?? detected.headerRow,
+  };
+}
+
+/**
+ * Parse a questionnaire file and create Question records.
+ * `mapping.questionCol` is optional; without it the column is detected.
  */
 export async function parseQuestionnaire(
   questionnaireId: string,
   filePath: string,
-  mapping: ColumnMapping,
+  mapping: Partial<ColumnMapping> = {},
 ): Promise<{ questionCount: number }> {
   // Update status to PARSING
   await prisma.questionnaire.update({
@@ -141,7 +205,8 @@ export async function parseQuestionnaire(
   });
 
   try {
-    return await parseAndStoreQuestions(questionnaireId, filePath, mapping);
+    const resolved = await resolveColumnMapping(filePath, mapping);
+    return await parseAndStoreQuestions(questionnaireId, filePath, resolved);
   } catch (error) {
     // Leave the questionnaire re-parseable instead of stuck in PARSING.
     await prisma.questionnaire.update({
@@ -266,7 +331,8 @@ export async function ingestQuestionnaireAsKB(
 }
 
 // Helper: Convert column letter to number (A=1, B=2, ..., AA=27)
-function columnToNumber(col: string): number {
+function columnToNumber(column: string): number {
+  const col = column.toUpperCase();
   let num = 0;
   for (let i = 0; i < col.length; i++) {
     num = num * 26 + col.charCodeAt(i) - 64;

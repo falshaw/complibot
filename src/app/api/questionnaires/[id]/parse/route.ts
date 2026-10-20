@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import {
   parseQuestionnaire,
   QuestionnaireParseError,
+  type ColumnMapping,
 } from "@/lib/services/QuestionnaireParserService";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 
@@ -34,13 +35,15 @@ export const POST = apiHandler(
       );
     }
 
-    // Get column mapping from body or questionnaire
-    let mapping = questionnaire.columnMapping as {
-      questionCol?: string;
-    } | null;
+    // Column mapping: saved at upload, else from the request body, else the
+    // question column is detected from the header names / content.
+    let mapping = questionnaire.columnMapping as Partial<ColumnMapping> | null;
     if (!mapping) {
       const body = await req.json().catch(() => ({}));
-      mapping = body.columnMapping || { questionCol: "B" };
+      mapping =
+        body && typeof body.columnMapping === "object" && body.columnMapping
+          ? (body.columnMapping as Partial<ColumnMapping>)
+          : {};
     }
 
     let result: { questionCount: number };
@@ -48,7 +51,14 @@ export const POST = apiHandler(
       result = await parseQuestionnaire(
         questionnaire.id,
         questionnaire.filePath,
-        { questionCol: mapping?.questionCol || "B" },
+        {
+          questionCol:
+            typeof mapping.questionCol === "string" ? mapping.questionCol : undefined,
+          headerRow:
+            typeof mapping.headerRow === "number" ? mapping.headerRow : undefined,
+          sheetName:
+            typeof mapping.sheetName === "string" ? mapping.sheetName : undefined,
+        },
       );
     } catch (error) {
       if (error instanceof QuestionnaireParseError) {
