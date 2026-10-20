@@ -9,6 +9,11 @@ import { logger } from "./logger";
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:7b";
+// Thinking models (gemma4, qwen3, deepseek-r1, ...) otherwise spend the small
+// max_tokens budgets on hidden reasoning and return empty content. "none"
+// turns thinking off on Ollama and is ignored by non-thinking models. Set to
+// an empty string to omit the parameter (e.g. for servers that reject it).
+const REASONING_EFFORT = process.env.OLLAMA_REASONING_EFFORT ?? "none";
 
 // LLM provider switch — "ollama" (default) or "claude" (optional HTTP bridge,
 // see README: POST {CLAUDE_BRIDGE_URL}/generate).
@@ -191,7 +196,11 @@ export async function ollamaChatWithBreaker(
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const result = await ollama.chat.completions.create(params);
+      const result = await ollama.chat.completions.create(
+        (REASONING_EFFORT
+          ? { ...params, reasoning_effort: REASONING_EFFORT }
+          : params) as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+      );
       recordSuccess();
       return result;
     } catch (error: unknown) {

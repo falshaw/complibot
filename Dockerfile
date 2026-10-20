@@ -18,7 +18,7 @@ RUN npm ci
 FROM deps AS init
 COPY tsconfig.json ./
 COPY src/lib/demo-knowledge.ts ./src/lib/demo-knowledge.ts
-ENV NODE_ENV=production
+ENV NODE_ENV=production NPM_CONFIG_UPDATE_NOTIFIER=false
 USER node
 CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts"]
 
