@@ -3,9 +3,11 @@ import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import { generateAnswer } from "@/lib/services/AnswerGenerationService";
 import { RATE_LIMITS } from "@/lib/rateLimit";
+import { audit } from "@/lib/audit";
+import { refreshQuestionnaireCounts } from "@/lib/services/questionnaireCounts";
 
 export const POST = apiHandler(
-  async ({ params, organizationId }) => {
+  async ({ req, params, user, organizationId }) => {
     const existingAnswer = await prisma.answer.findFirst({
       where: {
         id: params.id,
@@ -47,6 +49,17 @@ export const POST = apiHandler(
         })),
       });
     }
+
+    await refreshQuestionnaireCounts(existingAnswer.question.questionnaireId);
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "answer.regenerate",
+      entityType: "Answer",
+      entityId: answer.id,
+      details: { confidence, sources: sourceIds.length },
+      req,
+    });
 
     return NextResponse.json(answer);
   },

@@ -3,6 +3,7 @@ import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import { createKnowledgeEntrySchema } from "@/lib/validators/knowledge";
 import type { SecurityDomain } from "@prisma/client";
+import { audit } from "@/lib/audit";
 
 // GET /api/knowledge - List knowledge entries with optional domain filter
 export const GET = apiHandler(async ({ req, organizationId }) => {
@@ -46,12 +47,20 @@ export const GET = apiHandler(async ({ req, organizationId }) => {
 
 // POST /api/knowledge - Create manual knowledge entry
 export const POST = apiHandler(
-  async ({ body, organizationId }) => {
+  async ({ req, body, user, organizationId }) => {
     const entry = await prisma.knowledgeEntry.create({
       data: {
         ...body,
         organizationId,
       },
+    });
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "knowledge.create",
+      entityType: "KnowledgeEntry",
+      entityId: entry.id,
+      req,
     });
 
     return NextResponse.json(entry, { status: 201 });

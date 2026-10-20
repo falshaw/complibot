@@ -135,7 +135,21 @@ const respondSchema = z.object({
 
 // POST /api/interview/[id]/respond - Submit answer, return full state
 export const POST = apiHandler(
-  async ({ body, params }) => {
+  async ({ body, params, organizationId }) => {
+    const owned = await prisma.interviewSession.findFirst({
+      where: { id: params.id, organizationId },
+      select: { status: true },
+    });
+    if (!owned) {
+      return NextResponse.json({ error: "Interview not found" }, { status: 404 });
+    }
+    if (owned.status !== "active") {
+      return NextResponse.json(
+        { error: "This interview is finished." },
+        { status: 409 },
+      );
+    }
+
     await processResponse(params.id, body.response);
 
     // Re-fetch updated session and return transformed state

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
+import { audit } from "@/lib/audit";
+import { refreshQuestionnaireCounts } from "@/lib/services/questionnaireCounts";
 
-export const POST = apiHandler(async ({ params, user, organizationId }) => {
+export const POST = apiHandler(async ({ req, params, user, organizationId }) => {
   const existing = await prisma.answer.findFirst({
     where: {
       id: params.id,
       question: { questionnaire: { organizationId } },
     },
-    select: { id: true },
+    select: { id: true, question: { select: { questionnaireId: true } } },
   });
 
   if (!existing) {
@@ -23,22 +25,16 @@ export const POST = apiHandler(async ({ params, user, organizationId }) => {
     },
   });
 
-  // Update questionnaire counts
-  const question = await prisma.question.findUnique({
-    where: { id: answer.questionId },
+  await refreshQuestionnaireCounts(existing.question.questionnaireId);
+  await audit({
+    organizationId,
+    userId: user.id,
+    action: "answer.approve",
+    entityType: "Answer",
+    entityId: answer.id,
+    details: { questionnaireId: existing.question.questionnaireId },
+    req,
   });
-  if (question) {
-    const approvedCount = await prisma.answer.count({
-      where: {
-        question: { questionnaireId: question.questionnaireId },
-        status: "APPROVED",
-      },
-    });
-    await prisma.questionnaire.update({
-      where: { id: question.questionnaireId },
-      data: { approvedCount },
-    });
-  }
 
   return NextResponse.json(answer);
 });

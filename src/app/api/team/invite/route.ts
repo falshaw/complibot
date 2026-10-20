@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 
 // GET /api/team/invite — list pending invitations
@@ -37,7 +38,7 @@ const inviteSchema = z.object({
 });
 
 export const POST = apiHandler(
-  async ({ body, user, organizationId }) => {
+  async ({ req, body, user, organizationId }) => {
     // Check if user already exists in org
     const existing = await prisma.user.findFirst({
       where: { email: body.email, organizationId },
@@ -86,6 +87,16 @@ export const POST = apiHandler(
       },
     });
 
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "team.invite",
+      entityType: "OrganizationInvitation",
+      entityId: invitation.id,
+      details: { email: invitation.email, role: invitation.role },
+      req,
+    });
+
     return NextResponse.json({
       ...invitation,
       inviteUrl: `/join?token=${token}`,
@@ -96,7 +107,7 @@ export const POST = apiHandler(
 
 // DELETE /api/team/invite — revoke invitation
 export const DELETE = apiHandler(
-  async ({ req, organizationId }) => {
+  async ({ req, user, organizationId }) => {
     const { searchParams } = new URL(req.url);
     const invitationId = searchParams.get("id");
     if (!invitationId) {
@@ -115,6 +126,15 @@ export const DELETE = apiHandler(
 
     await prisma.organizationInvitation.delete({
       where: { id: invitationId },
+    });
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "team.invite_revoke",
+      entityType: "OrganizationInvitation",
+      entityId: invitationId,
+      details: { email: invitation.email },
+      req,
     });
 
     return NextResponse.json({ success: true });

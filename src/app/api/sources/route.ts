@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import { RATE_LIMITS } from "@/lib/rateLimit";
@@ -47,7 +48,7 @@ export const GET = apiHandler(async ({ req, organizationId }) => {
 
 // POST /api/sources - Upload source file for KB ingestion
 export const POST = apiHandler(
-  async ({ req, organizationId }) => {
+  async ({ req, user, organizationId }) => {
     const formData = await req.formData();
     const file = formData.get("file") as File;
     const sourceType =
@@ -140,6 +141,16 @@ export const POST = apiHandler(
         data: { status: "pending" },
       });
     }
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "knowledge.source_upload",
+      entityType: "KnowledgeSource",
+      entityId: source.id,
+      details: { fileName: source.fileName },
+      req,
+    });
 
     return NextResponse.json(source, { status: 201 });
   },

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
@@ -50,7 +51,7 @@ export const GET = apiHandler(async ({ req, organizationId }) => {
 
 // POST /api/questionnaires - Upload new questionnaire
 export const POST = apiHandler(
-  async ({ req, organizationId }) => {
+  async ({ req, user, organizationId }) => {
     const formData = await req.formData();
     const file = formData.get("file") as File;
     const name = formData.get("name") as string;
@@ -123,6 +124,16 @@ export const POST = apiHandler(
         status: "UPLOADED",
         columnMapping: parsedColumnMapping ?? Prisma.JsonNull,
       },
+    });
+
+    await audit({
+      organizationId,
+      userId: user.id,
+      action: "questionnaire.upload",
+      entityType: "Questionnaire",
+      entityId: questionnaire.id,
+      details: { fileName: file.name },
+      req,
     });
 
     return NextResponse.json(questionnaire, { status: 201 });
