@@ -5,7 +5,10 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   test: {
-    environment: "jsdom",
+    // No test renders components; the one that needs `window` opts into jsdom
+    // with a @vitest-environment docblock. jsdom per file was most of the
+    // cold-start time.
+    environment: "node",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
