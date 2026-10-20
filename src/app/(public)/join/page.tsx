@@ -57,7 +57,11 @@ function JoinForm() {
     fetch(`/api/invite?token=${encodeURIComponent(token)}`)
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
-        show(res.ok ? { kind: "ready", invitation: data } : { kind: "invalid", message: data.error || "This invitation link is not valid." });
+        show(
+          res.ok && data.valid
+            ? { kind: "ready", invitation: data }
+            : { kind: "invalid", message: data.error || "This invitation link is not valid." },
+        );
       })
       .catch(() => show({ kind: "invalid", message: "Could not check the invitation. Reload the page to try again." }));
     return () => {

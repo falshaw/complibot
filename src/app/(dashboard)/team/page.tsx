@@ -186,7 +186,7 @@ export default function TeamPage() {
               autoFocus
               required
             />
-            <select className="input" aria-label="Role" value={role} onChange={(e) => setRole(e.target.value)}>
+            <select className="input" aria-label="Role for the new member" value={role} onChange={(e) => setRole(e.target.value)}>
               {ROLES.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.label}

@@ -128,27 +128,33 @@ describe("invitee opens the join link", () => {
     const res = await joinGET(json(`/api/invite?token=${TOKEN}`, "GET"));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ email: "new.person@demo.com", role: "REVIEWER", organizationName: "Demo Company" });
+    expect(await res.json()).toMatchObject({ valid: true, email: "new.person@demo.com", role: "REVIEWER", organizationName: "Demo Company" });
     expect(db.organizationInvitation.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { token: TOKEN_HASH } }),
     );
   });
 
-  it("rejects malformed, unknown, expired and used links", async () => {
-    const malformed = await joinGET(json("/api/invite?token=abc", "GET"));
-    expect(malformed.status).toBe(404);
+  it("reports malformed, unknown, expired and used links as not valid, with the reason", async () => {
+    const reason = async (url: string) => {
+      const res = await joinGET(json(url, "GET"));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.valid).toBe(false);
+      expect(body).not.toHaveProperty("email");
+      return body.reason;
+    };
+
+    expect(await reason("/api/invite?token=abc")).toBe("invalid");
     expect(db.organizationInvitation.findUnique).not.toHaveBeenCalled();
 
     db.organizationInvitation.findUnique.mockResolvedValueOnce(null);
-    expect((await joinGET(json(`/api/invite?token=${TOKEN}`, "GET"))).status).toBe(404);
+    expect(await reason(`/api/invite?token=${TOKEN}`)).toBe("invalid");
 
     db.organizationInvitation.findUnique.mockResolvedValueOnce(openInvite({ expiresAt: new Date(Date.now() - 1000) }));
-    const expired = await joinGET(json(`/api/invite?token=${TOKEN}`, "GET"));
-    expect(expired.status).toBe(410);
-    expect((await expired.json()).reason).toBe("expired");
+    expect(await reason(`/api/invite?token=${TOKEN}`)).toBe("expired");
 
     db.organizationInvitation.findUnique.mockResolvedValueOnce(openInvite({ acceptedAt: new Date() }));
-    expect((await joinGET(json(`/api/invite?token=${TOKEN}`, "GET"))).status).toBe(410);
+    expect(await reason(`/api/invite?token=${TOKEN}`)).toBe("used");
   });
 });
 

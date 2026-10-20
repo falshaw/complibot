@@ -55,8 +55,10 @@ export function TemplateEditor({
     if (d && !d.open) d.showModal();
   }, []);
 
-  const update = (i: number, patch: Partial<EditableQuestion>) =>
+  const update = (i: number, patch: Partial<EditableQuestion>) => {
+    setError("");
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, ...patch } : q)));
+  };
 
   function addQuestion() {
     setQuestions((qs) => [...qs, { text: "", type: "FREE_TEXT", domain: "GENERAL", required: true }]);
@@ -104,9 +106,9 @@ export function TemplateEditor({
         e.preventDefault();
         if (!busy) onClose();
       }}
-      className="confirm-dialog glass m-auto w-[calc(100%-32px)] max-w-3xl p-0 text-left text-ink"
+      className="confirm-dialog glass m-auto w-[calc(100%-32px)] max-w-3xl overflow-hidden p-0 text-left text-ink"
     >
-      <form onSubmit={save} noValidate className="flex max-h-[calc(100dvh-32px)] flex-col">
+      <form onSubmit={save} noValidate className="flex max-h-[calc(100dvh-34px)] flex-col">
         <div className="border-b border-line p-5">
           <h2 id={titleId} className="!text-lg">
             Edit template
@@ -120,7 +122,7 @@ export function TemplateEditor({
           <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
             <label className="grid gap-1.5 text-[13px] font-medium">
               Name
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} required />
+              <input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} maxLength={200} required />
             </label>
             <label className="grid gap-1.5 text-[13px] font-medium">
               Framework
