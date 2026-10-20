@@ -216,7 +216,7 @@ export default function TeamPage() {
             <tr>
               <th>Member</th>
               <th className="hidden sm:table-cell">Last sign-in</th>
-              <th>
+              <th className="text-right">
                 Role<span className="sr-only"> and actions</span>
               </th>
             </tr>

@@ -502,13 +502,19 @@ export default function QuestionnaireReviewPage() {
                   )}
 
                   {answer.sources.length > 0 ? (
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className={`grid gap-3 ${answer.sources.length > 1 ? "md:grid-cols-2" : ""}`}>
                       {answer.sources.map((s, i) => (
-                        <CitedEntry key={s.id} n={i + 1} source={s} maxHeight={230} />
+                        <CitedEntry key={s.id} n={i + 1} source={s} maxHeight={answer.sources.length > 1 ? 230 : 320} />
                       ))}
                     </div>
                   ) : (
-                    <p className="text-[13px] text-ink-65">No knowledge-base entries cited.</p>
+                    <p className="text-[13px] text-ink-65">
+                      No knowledge-base entry supports this draft. Add the answer to the{" "}
+                      <Link href="/knowledge/new" className="text-accent underline-offset-2 hover:underline">
+                        knowledge base
+                      </Link>
+                      , then regenerate.
+                    </p>
                   )}
 
                 </>
