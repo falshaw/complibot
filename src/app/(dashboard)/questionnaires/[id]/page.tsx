@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { CitedEntry, type CitedSource } from "@/components/CitedEntry";
+import { DeleteQuestionnaireButton } from "@/components/DeleteQuestionnaireButton";
 import { EmptyState, LoadingBlocks } from "@/components/ui/PageHeader";
 import { answerStatus, domainLabel, typeLabel } from "@/lib/ui/labels";
 
@@ -55,6 +57,11 @@ function stepState(status: string) {
   };
 }
 
+async function loadQuestionnaire(id: string): Promise<Questionnaire | null> {
+  const res = await fetch(`/api/questionnaires/${id}`).catch(() => null);
+  return res?.ok ? res.json() : null;
+}
+
 async function errorText(res: Response, fallback: string) {
   const data = await res.json().catch(() => ({}));
   return (data as { error?: string }).error || fallback;
@@ -62,6 +69,9 @@ async function errorText(res: Response, fallback: string) {
 
 export default function QuestionnaireReviewPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const role = useSession().data?.user?.role;
+  const canDelete = role === "ADMIN" || role === "RESPONDER";
   const [q, setQ] = useState<Questionnaire | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [threshold, setThreshold] = useState(0.8);
@@ -72,19 +82,22 @@ export default function QuestionnaireReviewPage() {
   const initialPick = useRef(false);
 
   const fetchData = useCallback(async () => {
-    const res = await fetch(`/api/questionnaires/${id}`);
-    if (!res.ok) {
-      setNotFound(true);
-      return null;
-    }
-    const data: Questionnaire = await res.json();
-    setQ(data);
+    const data = await loadQuestionnaire(id);
+    if (data) setQ(data);
+    else setNotFound(true);
     return data;
   }, [id]);
 
   useEffect(() => {
-    fetchData().then((data) => {
-      if (!data || initialPick.current) return;
+    let cancelled = false;
+    loadQuestionnaire(id).then((data) => {
+      if (cancelled) return;
+      if (!data) {
+        setNotFound(true);
+        return;
+      }
+      setQ(data);
+      if (initialPick.current) return;
       initialPick.current = true;
       // ?q=<row> from the dashboard opens that question
       const row = Number(new URLSearchParams(window.location.search).get("q"));
@@ -93,9 +106,12 @@ export default function QuestionnaireReviewPage() {
     });
     fetch("/api/organizations")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.organization && setThreshold(d.organization.confidenceThreshold))
+      .then((d) => !cancelled && d?.organization && setThreshold(d.organization.confidenceThreshold))
       .catch(() => {});
-  }, [fetchData]);
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // While answers are being generated, refresh the list every few seconds.
   useEffect(() => {
@@ -309,6 +325,15 @@ export default function QuestionnaireReviewPage() {
             <Link href={`/questionnaires/${id}/export`} className="btn btn-primary btn-sm">
               Export
             </Link>
+          )}
+          {canDelete && q.status !== "GENERATING" && (
+            <DeleteQuestionnaireButton
+              questionnaire={q}
+              onDeleted={() => {
+                toast.success(`Deleted ${q.name}`);
+                router.push("/questionnaires");
+              }}
+            />
           )}
         </div>
       </div>
