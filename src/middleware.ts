@@ -19,9 +19,6 @@ function csrfCheck(request: NextRequest): NextResponse | null {
       const origin = request.headers.get("origin");
       const host = request.headers.get("host");
 
-      const isWebhook = pathname.startsWith("/api/billing/webhook");
-      if (isWebhook) return null;
-
       if (origin && host) {
         try {
           const originHost = new URL(origin).host;

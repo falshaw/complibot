@@ -19,7 +19,6 @@ async function main() {
     create: {
       id: "org-demo",
       name: "Demo Security Corp",
-      planTier: "PRO",
     },
   });
 

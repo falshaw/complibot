@@ -74,12 +74,6 @@ enum SourceType {
   MANUAL
 }
 
-enum PlanTier {
-  FREE
-  PRO
-  ENTERPRISE
-}
-
 // =============================================================================
 // Core Models
 // =============================================================================
@@ -88,9 +82,6 @@ model Organization {
   id        String   @id @default(cuid())
   name      String
   domain    String?
-  planTier  PlanTier @default(FREE)
-  stripeCustomerId String? @unique
-  stripeSubscriptionId String?
   confidenceThreshold  Float    @default(0.8) // CB-06: auto-approve if >= this, flag if below
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -103,7 +94,6 @@ model Organization {
   auditLogs          AuditLog[]
   templates          QuestionnaireTemplate[]
   invitations        OrganizationInvitation[]
-  subscription       Subscription?
 }
 
 model User {
@@ -394,49 +384,6 @@ model OrganizationInvitation {
   @@unique([organizationId, email])
   @@index([token])
   @@index([email])
-}
-
-// =============================================================================
-// Billing (CB-01)
-// =============================================================================
-
-enum SubscriptionStatus {
-  ACTIVE
-  PAST_DUE
-  CANCELED
-  INCOMPLETE
-  TRIALING
-}
-
-model Subscription {
-  id                   String             @id @default(cuid())
-  organizationId       String             @unique
-  stripeCustomerId     String             @unique
-  stripeSubscriptionId String?            @unique
-  plan                 PlanTier           @default(FREE)
-  status               SubscriptionStatus @default(ACTIVE)
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-
-  organization Organization @relation(fields: [organizationId], references: [id])
-
-  @@index([stripeCustomerId])
-}
-
-model UsageRecord {
-  id             String   @id @default(cuid())
-  organizationId String
-  metric         String   // e.g. "questionnaires", "kb_entries", "ai_generations"
-  count          Int      @default(0)
-  period         DateTime // first day of the billing period (month)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@unique([organizationId, metric, period])
-  @@index([organizationId])
-  @@index([period])
 }
 
 // =============================================================================

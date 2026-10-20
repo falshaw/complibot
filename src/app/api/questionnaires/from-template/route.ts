@@ -7,7 +7,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
-import { checkPlanLimit, incrementUsage } from "@/lib/billing";
 
 const fromTemplateSchema = z.object({
   templateId: z.string().min(1),
@@ -50,15 +49,6 @@ export const POST = apiHandler(
       );
     }
 
-    // Check questionnaire plan limit
-    const limitCheck = await checkPlanLimit(
-      organizationId,
-      "questionnairesPerMonth",
-    );
-    if (!limitCheck.allowed) {
-      return NextResponse.json({ error: limitCheck.reason }, { status: 403 });
-    }
-
     // Create questionnaire in PARSED state (skip upload/parse)
     const questionnaire = await prisma.questionnaire.create({
       data: {
@@ -85,9 +75,6 @@ export const POST = apiHandler(
         domain: (q.domain || "GENERAL") as never,
       })),
     });
-
-    // Track usage
-    await incrementUsage(organizationId, "questionnaires");
 
     return NextResponse.json(
       {

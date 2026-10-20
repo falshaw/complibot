@@ -26,7 +26,6 @@ export const GET = apiHandler(
       organization: {
         id: organization.id,
         name: organization.name,
-        plan: organization.planTier,
         confidenceThreshold: organization.confidenceThreshold,
         knowledgeEntryCount: organization._count.knowledgeEntries,
         questionnaireCount: organization._count.questionnaires,

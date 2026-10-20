@@ -7,7 +7,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import prisma from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { checkPlanLimit, incrementUsage } from "@/lib/billing";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -44,32 +43,6 @@ export async function POST(req: NextRequest) {
         { error: `Maximum ${MAX_FILES} files allowed per upload` },
         { status: 400 },
       );
-    }
-
-    // Check questionnaire plan limit before processing files
-    const limitCheck = await checkPlanLimit(
-      user.organizationId,
-      "questionnairesPerMonth",
-    );
-    if (!limitCheck.allowed) {
-      return NextResponse.json({ error: limitCheck.reason }, { status: 403 });
-    }
-
-    // For free tier, check if adding these files would exceed the limit
-    if (
-      limitCheck.limit !== undefined &&
-      limitCheck.limit !== -1 &&
-      limitCheck.current !== undefined
-    ) {
-      const remaining = limitCheck.limit - limitCheck.current;
-      if (files.length > remaining) {
-        return NextResponse.json(
-          {
-            error: `You can only upload ${remaining} more questionnaire(s) this month (limit: ${limitCheck.limit}). Upgrade your plan for more.`,
-          },
-          { status: 403 },
-        );
-      }
     }
 
     const uploadsDir = path.join(process.cwd(), "uploads");
@@ -133,9 +106,6 @@ export async function POST(req: NextRequest) {
             status: "UPLOADED",
           },
         });
-
-        // Track usage
-        await incrementUsage(user.organizationId, "questionnaires");
 
         results.push({
           fileName: file.name,

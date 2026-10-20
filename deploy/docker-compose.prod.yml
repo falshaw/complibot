@@ -11,7 +11,7 @@
 #   - adds Caddy (80/443, automatic TLS) in front of the app
 #   - adds a self-hosted Ollama so answers never leave the box (matches the
 #     "self-hosted / your data, your servers" positioning)
-#   - points the app at the public HTTPS URL + the local Ollama, and wires Stripe
+#   - points the app at the public HTTPS URL + the local Ollama
 #
 # ⚠️ Not yet validated on a live server — test on a staging box first.
 #    After the first `up`, pull the models into the bundled Ollama, e.g.:
@@ -29,17 +29,12 @@ services:
   complibot-app:
     restart: unless-stopped
     environment:
-      # Public origin — REQUIRED for NextAuth callbacks + Stripe redirects.
+      # Public origin — REQUIRED for NextAuth callbacks.
       - NEXTAUTH_URL=${COMPLIBOT_PUBLIC_URL:?set to https://your-domain in deploy/.env.prod}
       # Self-hosted LLM on this box (data residency).
       - LLM_PROVIDER=ollama
       - OLLAMA_HOST=http://complibot-ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
-      # Billing — live keys live ONLY in deploy/.env.prod (gitignored).
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:?required for billing}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:?required for billing}
-      - STRIPE_PRO_PRICE_ID=${STRIPE_PRO_PRICE_ID:?required for billing}
-      - STRIPE_ENTERPRISE_PRICE_ID=${STRIPE_ENTERPRISE_PRICE_ID:?required for billing}
     depends_on:
       complibot-postgres:
         condition: service_healthy

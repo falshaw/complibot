@@ -3,12 +3,11 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
-import { Building2, Users, Key, SlidersHorizontal } from "lucide-react";
+import { Building2, Users, SlidersHorizontal } from "lucide-react";
 
 interface OrgData {
   id: string;
   name: string;
-  plan: string;
   confidenceThreshold: number;
   knowledgeEntryCount: number;
   questionnaireCount: number;
@@ -96,12 +95,6 @@ export default function SettingsPage() {
             />
           </div>
           <div className="flex items-center gap-4 text-sm text-slate-400">
-            <span>
-              Plan:{" "}
-              <span className="text-indigo-400 font-medium">
-                {org?.plan || "FREE"}
-              </span>
-            </span>
             <span>KB Entries: {org?.knowledgeEntryCount || 0}</span>
             <span>Questionnaires: {org?.questionnaireCount || 0}</span>
           </div>
@@ -203,17 +196,6 @@ export default function SettingsPage() {
             <span className="text-white">{session?.user?.role || "—"}</span>
           </div>
         </div>
-      </div>
-
-      {/* API Key (placeholder) */}
-      <div className="card-panel">
-        <div className="flex items-center gap-2 mb-4">
-          <Key className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-lg font-semibold text-white">API</h2>
-        </div>
-        <p className="text-sm text-slate-400">
-          API access is available on the Enterprise plan.
-        </p>
       </div>
     </div>
   );
