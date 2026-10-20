@@ -9,8 +9,11 @@ let AsyncLocalStorage: typeof import("async_hooks").AsyncLocalStorage | null =
 let randomUUID: typeof import("crypto").randomUUID | null = null;
 
 if (isServer) {
+  // Lazy server-only require keeps these Node built-ins out of client bundles.
+  /* eslint-disable @typescript-eslint/no-require-imports */
   AsyncLocalStorage = require("async_hooks").AsyncLocalStorage;
   randomUUID = require("crypto").randomUUID;
+  /* eslint-enable @typescript-eslint/no-require-imports */
 }
 
 export interface RequestContext {

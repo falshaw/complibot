@@ -75,7 +75,7 @@ vi.mock("@/lib/prisma", () => ({
       create: vi.fn(),
       update: vi.fn(),
     },
-    $transaction: vi.fn((fn: any) =>
+    $transaction: vi.fn((fn: unknown) =>
       typeof fn === "function" ? fn({}) : Promise.all(fn),
     ),
     $queryRaw: vi.fn(),

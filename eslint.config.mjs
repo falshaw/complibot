@@ -25,6 +25,11 @@ const eslintConfig = defineConfig([
           varsIgnorePattern: "^_",
         },
       ],
+      // React Compiler rules added in eslint-plugin-react-hooks 7. The flagged
+      // effects (data loading on mount, handlers referenced from a keyboard
+      // effect) work correctly; kept visible as warnings until refactored.
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/immutability": "warn",
     },
   },
 ]);

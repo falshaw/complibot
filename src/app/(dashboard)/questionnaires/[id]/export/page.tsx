@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   Download,
   ArrowLeft,
@@ -23,7 +23,6 @@ interface ExportPreview {
 
 export default function ExportPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);

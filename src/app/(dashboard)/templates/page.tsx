@@ -18,7 +18,6 @@ import {
   CheckCircle,
   Play,
   ChevronDown,
-  ChevronUp,
   X,
   Hash,
   Tag,
@@ -100,7 +99,7 @@ export default function TemplatesPage() {
 
   const handleCreateFromTemplate = async (
     templateId: string,
-    templateName: string,
+    _templateName: string,
   ) => {
     setCreating(templateId);
     try {
