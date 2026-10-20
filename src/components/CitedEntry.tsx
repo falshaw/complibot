@@ -49,7 +49,7 @@ export function CitedEntry({
         aria-label={`Cited entry ${n}`}
       >
         <span className="c">
-          # rank {source.rank + 1} · similarity {source.similarity.toFixed(2)}
+          # rank {source.rank + 1} · relevance {source.similarity.toFixed(2)}
         </span>
         {"\n"}
         <span className="k">entry</span>{"   "}

@@ -6,7 +6,8 @@
 import ExcelJS from "exceljs";
 import Papa from "papaparse";
 import prisma from "@/lib/prisma";
-import { classifyDomain, detectQuestionType } from "./AnswerGenerationService";
+import { classifyDomain } from "./AnswerGenerationService";
+import { detectQuestionType } from "./questionType";
 import { logger } from "@/lib/logger";
 import { detectQuestionColumn } from "./columnDetection";
 import * as fs from "fs";
@@ -331,7 +332,7 @@ export async function ingestQuestionnaireAsKB(
 }
 
 // Helper: Convert column letter to number (A=1, B=2, ..., AA=27)
-function columnToNumber(column: string): number {
+export function columnToNumber(column: string): number {
   const col = column.toUpperCase();
   let num = 0;
   for (let i = 0; i < col.length; i++) {
@@ -357,7 +358,7 @@ function cellToString(cell: ExcelJS.Cell): string {
 }
 
 // Helper: Extract keywords from question text
-function extractKeywords(text: string): string[] {
+export function extractKeywords(text: string): string[] {
   const stopWords = new Set([
     "the",
     "a",
