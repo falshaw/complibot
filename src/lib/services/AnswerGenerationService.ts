@@ -1,6 +1,7 @@
 /**
  * CompliBot - Answer Generation Service
- * Uses RAG (Retrieval Augmented Generation) with GPT-4o to generate answers.
+ * Retrieval Augmented Generation: retrieve the best-scoring knowledge-base
+ * entries for a question, then ask the configured LLM to draft the answer.
  */
 
 import prisma from "@/lib/prisma";
@@ -11,6 +12,9 @@ import { ollamaChatWithBreaker, OLLAMA_MODEL } from "@/lib/ollama";
 import type { QuestionType, SecurityDomain } from "@prisma/client";
 
 const PROMPT_VERSION = "2026-03-01";
+
+/** Number of top-scored knowledge entries passed to the LLM as context. */
+const MAX_CONTEXT_ENTRIES = 5;
 
 const PROMPT_TEMPLATES: Record<string, string> = {
   YES_NO: `You are answering a security questionnaire. Based on the company's knowledge base context below, answer this yes/no question.
@@ -68,7 +72,7 @@ function calculateConfidence(
 }
 
 /**
- * Classify question into a security domain using GPT-4o-mini
+ * Classify question into a security domain with the configured LLM
  */
 export async function classifyDomain(
   questionText: string,
@@ -217,11 +221,12 @@ export async function generateAnswer(
     prefetched?.question ??
     (await prisma.question.findUniqueOrThrow({ where: { id: questionId } }));
 
-  // Search for relevant knowledge
+  // Retrieve the top-scored knowledge entries (best first). The domain only
+  // boosts matching entries; it does not filter.
   const searchResults = await hybridSearch(
     organizationId,
     question.questionText,
-    5,
+    MAX_CONTEXT_ENTRIES,
     question.domain,
   );
 
