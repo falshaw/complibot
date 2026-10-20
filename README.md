@@ -2,21 +2,23 @@
 
 A self-hosted web app that drafts answers to vendor security questionnaires (SIG, CAIQ, ISO 27001, SOC 2 style spreadsheets) from your own security knowledge base, using retrieval-augmented generation on a local LLM.
 
+![Dashboard, light theme](docs/dashboard-light.png)
+
 ## Why
 
 Security questionnaires repeat the same questions in different wording. Answering them by hand means searching old spreadsheets and policies every time. complibot keeps a reviewed knowledge base of your answers, retrieves the closest entries for each new question, drafts an answer with a confidence score and citations, and leaves the final approval to a human reviewer. It runs on your own machine with Ollama by default, so questionnaire content does not have to leave your infrastructure.
 
 ## Features
 
-- **Questionnaire upload and parsing**: Excel (`.xlsx`) and CSV. The question column is detected automatically (or set explicitly), questions are classified by type (yes/no, text, date, numeric, ...) and security domain (20 domains).
-- **RAG answer generation**: keyword search (always on) plus optional pgvector semantic search over the knowledge base; the top-scored entries go to the LLM, which drafts each answer with a confidence score and the source entries it used.
-- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; approve, reject, edit or regenerate answers; bulk-approve.
+- **Questionnaire upload and parsing**: Excel (`.xlsx`) and CSV. The question column is detected automatically (or set explicitly), questions are classified by type (yes/no, free text, date, numeric, evidence, multiple choice) and security domain (20 domains). Questionnaires can be deleted with everything drafted for them.
+- **RAG answer generation**: keyword search (always on) plus optional pgvector semantic search over the knowledge base. Weak matches are dropped before the LLM sees them, the LLM states which sources it used, and only those are cited. Each draft gets a confidence score that reflects how well the cited entries support it (see [How drafts are scored](#how-drafts-are-scored)).
+- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; drafts below the organization's threshold are flagged; approve, reject, edit or regenerate answers; bulk-approve.
 - **Export**: completed questionnaires to Excel or a text report.
 - **Knowledge base**: add, edit, verify and delete entries, import question/answer pairs from spreadsheets, search, per-domain stats, and a **gap analysis** that shows thin domains.
 - **Knowledge interview**: an AI-led interview that cycles through security domains and turns your replies into knowledge-base entries.
-- **Templates**: seeded questionnaire templates (SIG Lite, CAIQ v4, VSA, NIST CSF, ISO 27001, CIS Controls v8, SOC 2 readiness).
-- **Teams and RBAC**: organizations, roles, member management. Invitations are recorded, but there is no join page yet and no email is sent.
-- **Audit trail**: review decisions, knowledge-base changes, uploads, exports, settings and team changes, recorded per organization.
+- **Templates**: seeded questionnaire templates (SIG Lite, CAIQ v4, VSA, NIST CSF, ISO 27001, CIS Controls v8, SOC 2 readiness). Copy one to make your own, then edit or delete the copy; the built-ins are read-only.
+- **Teams and RBAC**: roles (admin, reviewer, responder, viewer), invitations by one-time join link (no email, no public sign-up), role changes, removing and reactivating members.
+- **Audit trail**: review decisions, knowledge-base changes, uploads, deletions, exports, template edits, settings and team changes, recorded per organization.
 - **Security**: CSRF protection in middleware, Redis-backed rate limiting, login lockout, input sanitization, AES-256-GCM field encryption, least-privilege database role, hardened containers (read-only root, dropped capabilities, resource limits).
 
 ## Quick start
@@ -98,9 +100,42 @@ Open http://localhost:3005 (or your `COMPLIBOT_PORT`) and sign in as `admin@demo
 
 To add knowledge in bulk, upload [`samples/knowledge-base-import.csv`](samples/knowledge-base-import.csv) under **Knowledge Base → Upload source** (question column A, answer column B). **Templates** creates a ready-parsed assessment from SIG Lite, CAIQ, ISO 27001, SOC 2 and others.
 
-There is no self-registration: users are created by the seed (`admin@demo.com`, `reviewer@demo.com`) and managed under **Team**.
-
 Stop with `docker compose down` (add `-v` to delete the database volume).
+
+## Users and invitations
+
+There is no public sign-up. The seed creates `admin@demo.com` (admin) and `reviewer@demo.com` (reviewer) with the seed password; everyone else is invited by an admin:
+
+1. **Team → Invite member**: enter the email and a role. CompliBot sends no email: it shows a join link (`/join?token=…`) once, to copy and pass on.
+2. The invitee opens the link, sees the organization and role, sets a password (at least 12 characters with a special character, the same rule as sign-in) and is signed in.
+
+The link works once and expires after 7 days. Only a SHA-256 hash of the token is stored, so a lost link cannot be read back: revoke the pending invitation and invite again. An email that already has an account cannot be invited.
+
+**Remove** blocks a member at once (their open sessions stop working on the next request) and keeps their answers, reviews and audit entries; **Reactivate** brings them back with the same role. Role changes also apply immediately.
+
+![Team page with a one-time join link, light theme](docs/team-invite-light.png)
+
+<img src="docs/join-mobile-dark.png" alt="Join page on a phone, dark theme" width="320">
+
+## How drafts are scored
+
+For each question, retrieval returns up to five knowledge-base entries. Keyword scores and embedding similarities are on different scales (with `nomic-embed-text`, an unrelated security entry still has a cosine similarity of about 0.5–0.6), so both are mapped to one 0–1 relevance scale first (`src/lib/services/relevance.ts`). Entries below `max(0.30, 0.70 × the best entry)` are dropped and never shown to the model.
+
+The prompt numbers the remaining entries, tells the model to use only them, to say when the knowledge base does not cover a question, and to end with a `Sources: 1, 3` line. Only the entries on that line are cited (if a model leaves the line out, the entries the answer visibly draws on are cited instead).
+
+Confidence (`src/lib/services/answerQuality.ts`) is
+
+```
+0.3 × relevance of the best cited entry
++ 0.3 × share of the question's terms found in the cited entries
++ 0.4 × share of the answer's terms found in the cited entries (full marks from 70 %)
+```
+
+halved when the draft says the knowledge base does not cover (part of) the question, and capped at 0.2 when nothing is cited. Drafts below the organization's threshold (**Settings**, default 0.8) are flagged for a closer look.
+
+On the sample questionnaire with `gemma4:31b`, the five drafts the demo knowledge base supports scored 0.82–0.93 and each cited the one entry it used; four questions the knowledge base cannot answer (FedRAMP, staff count, ISO audit date, bug bounty) were answered "not covered" and scored 0.
+
+![Answer review with confidence and the cited entry, dark theme](docs/review-dark.png)
 
 ## Question column detection (`columnMapping`)
 
@@ -230,7 +265,7 @@ npm run dev            # http://localhost:3005, uses DATABASE_URL / REDIS_* from
 
 `npm run db:seed` seeds from the host using `DATABASE_URL` in `.env`.
 
-Tests cover keyword retrieval against the demo knowledge base (the "Do you encrypt customer data at rest?" question must retrieve both encryption entries), question-column detection, questionnaire status transitions, the parser, confidence scoring and benchmark scoring.
+Tests (Vitest, about 100, no database or LLM needed) cover keyword retrieval against the demo knowledge base, the relevance cut-off and confidence scoring (with real `gemma4:31b` drafts as fixtures), citation parsing, question-type detection, question-column detection, questionnaire status transitions, the invitation flow (hashed single-use tokens, expiry, password rules), member removal and reactivation, questionnaire and template deletion, organization scoping of the API routes and benchmark scoring. `npm run test:coverage` reports coverage.
 
 `scripts/benchmark.ts` scores AI answers against reference answers (token-F1 per domain):
 
@@ -246,6 +281,19 @@ npx tsx scripts/benchmark.ts scripts/benchmark-sample.json 0.5
 | `Bind for 127.0.0.1:3005 failed: port is already allocated` | set `COMPLIBOT_PORT` (and `NEXTAUTH_URL`) in `.env`, or `COMPLIBOT_DB_PORT` / `COMPLIBOT_REDIS_PORT` |
 | Generation returns 502 "No answers could be generated" | Ollama not reachable from the container or `OLLAMA_MODEL` not pulled. The questionnaire stays in PARSED status; fix and click Generate again |
 | Login fails with the seed password | the password is only set when the demo users are first created; `docker compose down -v` resets the database |
+
+## Limits
+
+Be aware of what it does not do:
+
+- **Spreadsheets only.** Questionnaires and knowledge sources are imported from `.xlsx` and `.csv`. PDF, Word and the old binary `.xls` format are not supported; to use a policy document, paste the relevant answers into knowledge-base entries or run the knowledge interview.
+- **Drafts, not answers.** Every draft is generated text and can be wrong; a person approves each one before export. The confidence score measures how well the cited entries support the draft, not whether the knowledge base itself is correct or current.
+- **Calibrated for the defaults.** The relevance scale and the confidence weights were tuned with `nomic-embed-text` and the demo knowledge base; another embedding model, or a very different knowledge base, may need other anchors in `relevance.ts`.
+- **No email.** Invitations are passed on as a link by the admin; there is no password reset by email either (an admin removes the member and invites them again).
+- **One organization per deployment in practice.** The data model has organizations, but there is no UI to create a second one or to move users between them.
+- **Uploaded files are temporary in Docker.** The app container keeps uploads on a tmpfs: parse a questionnaire before restarting the container (its questions and answers live in Postgres, the file does not).
+- **Single instance.** Generation runs inside the web process, one answer at a time on Ollama by default; a long questionnaire on a laptop takes minutes, and it is not a job queue for many users at once.
+- **Production overlay untested in public.** `deploy/docker-compose.prod.yml` (Caddy + bundled Ollama) has not been validated on a public server.
 
 ## License
 
