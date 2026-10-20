@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import { generateAnswer } from "@/lib/services/AnswerGenerationService";
-import { checkPlanLimit, incrementUsage } from "@/lib/billing";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 
 export const POST = apiHandler(
@@ -17,12 +16,6 @@ export const POST = apiHandler(
 
     if (!existingAnswer) {
       return NextResponse.json({ error: "Answer not found" }, { status: 404 });
-    }
-
-    // Enforce the plan's monthly AI-generation quota.
-    const limit = await checkPlanLimit(organizationId, "aiGenerationsPerMonth");
-    if (!limit.allowed) {
-      return NextResponse.json({ error: limit.reason }, { status: 403 });
     }
 
     const { content, confidence, sourceIds } = await generateAnswer(
@@ -54,9 +47,6 @@ export const POST = apiHandler(
         })),
       });
     }
-
-    // Count the successful generation against the monthly quota.
-    await incrementUsage(organizationId, "ai_generations", 1);
 
     return NextResponse.json(answer);
   },

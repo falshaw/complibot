@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "CompliBot - AI Security Questionnaire Responder",
   description:
-    "Upload any vendor security questionnaire, get 90%+ accurate AI-generated answers in minutes.",
+    "Self-hosted assistant that drafts answers to vendor security questionnaires from your own knowledge base.",
 };
 
 export default function RootLayout({

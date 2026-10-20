@@ -13,7 +13,6 @@ import {
   LayoutTemplate,
   BarChart3,
   Users,
-  CreditCard,
 } from "lucide-react";
 import { clsx } from "clsx";
 
@@ -26,7 +25,6 @@ const navItems = [
   { href: "/knowledge/gap-analysis", icon: BarChart3, label: "Gap Analysis" },
   { href: "/audit", icon: ScrollText, label: "Audit Trail" },
   { href: "/team", icon: Users, label: "Team" },
-  { href: "/settings/billing", icon: CreditCard, label: "Billing" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];
 

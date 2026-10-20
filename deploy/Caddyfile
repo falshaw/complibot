@@ -19,8 +19,6 @@
 		-Server
 	}
 
-	# Stripe webhooks + the app's own routes are all under the same origin,
-	# so no extra path handling is needed.
 	request_body {
 		max_size 25MB
 	}

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
 import { generateQuestionnaireAnswers } from "@/lib/services/AnswerGenerationService";
-import { checkPlanLimit, incrementUsage } from "@/lib/billing";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 
 // POST /api/questionnaires/[id]/generate - Trigger AI answer generation
@@ -28,21 +27,10 @@ export const POST = apiHandler(
       );
     }
 
-    // Enforce the plan's monthly AI-generation quota before a batch run.
-    const limit = await checkPlanLimit(organizationId, "aiGenerationsPerMonth");
-    if (!limit.allowed) {
-      return NextResponse.json({ error: limit.reason }, { status: 403 });
-    }
-
     const result = await generateQuestionnaireAnswers(
       questionnaire.id,
       organizationId,
     );
-
-    // Count successful generations against the monthly quota.
-    if (result.generated > 0) {
-      await incrementUsage(organizationId, "ai_generations", result.generated);
-    }
 
     return NextResponse.json({
       message: "Answer generation complete",

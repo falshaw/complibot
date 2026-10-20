@@ -19,12 +19,6 @@ export default function LandingPage() {
         </div>
         <nav className="flex items-center gap-4">
           <Link
-            href="/pricing"
-            className="text-slate-300 hover:text-white text-sm"
-          >
-            Pricing
-          </Link>
-          <Link
             href="/login"
             className="text-slate-300 hover:text-white text-sm"
           >
@@ -34,7 +28,7 @@ export default function LandingPage() {
             href="/register"
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
-            Get Started Free
+            Create Account
           </Link>
         </nav>
       </header>
@@ -59,13 +53,13 @@ export default function LandingPage() {
             href="/register"
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg text-lg font-medium transition-colors"
           >
-            Start Free Trial
+            Create Account
           </Link>
           <Link
-            href="/pricing"
+            href="/login"
             className="border border-slate-600 hover:border-slate-500 text-slate-300 px-8 py-3 rounded-lg text-lg font-medium transition-colors"
           >
-            View Pricing
+            Sign In
           </Link>
         </div>
       </section>
