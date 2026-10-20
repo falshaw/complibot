@@ -170,7 +170,7 @@ export default function KnowledgePage() {
                     <span className="badge b-grey">not verified</span>
                   )}
                   <span className="text-xs text-ink-45">
-                    {e.source ? `from ${e.source.name}` : "added by hand"}
+                    {e.source ? `from ${e.source.name}` : "entered in the app"}
                   </span>
                 </div>
                 <p className="truncate font-semibold">{e.question}</p>

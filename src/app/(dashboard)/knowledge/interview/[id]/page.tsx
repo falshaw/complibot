@@ -78,7 +78,8 @@ export default function InterviewSessionPage() {
     const res = await fetch(`/api/interview/${id}/complete`, { method: "POST" });
     if (!res.ok) return toast.error("Could not finish the interview");
     const data = await res.json().catch(() => ({}));
-    toast.success(`Interview finished: ${data.entriesCreated ?? 0} knowledge-base entries added`);
+    const n = data.entriesCreated ?? 0;
+    toast.success(`Interview finished: ${n} knowledge-base ${n === 1 ? "entry" : "entries"} added`);
     router.push("/knowledge");
   }
 

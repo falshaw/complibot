@@ -172,7 +172,7 @@ export default async function DashboardPage() {
               </div>
             </div>
           ) : (
-            <div className="flex h-[180px] items-stretch gap-2.5">
+            <div className="flex h-[180px] items-stretch justify-center gap-2.5">
               {d.questionnaires.map((q) => {
                 const p = pct(q.approvedCount, q.totalQuestions);
                 const full = p === 100;
@@ -180,7 +180,7 @@ export default async function DashboardPage() {
                   <Link
                     key={q.id}
                     href={`/questionnaires/${q.id}`}
-                    className="flex min-w-0 flex-1 flex-col items-center gap-2"
+                    className="flex min-w-0 max-w-[64px] flex-1 flex-col items-center gap-2"
                     title={`${q.name}: ${q.approvedCount} of ${q.totalQuestions} approved`}
                   >
                     <span className="relative w-full flex-1 overflow-hidden rounded-full bg-track">
@@ -236,7 +236,7 @@ export default async function DashboardPage() {
         </div>
 
         <Tile title="KB coverage" chip={`${d.kb.totalDomains} domains`}>
-          <div className="flex flex-col items-center gap-[18px] sm:flex-row">
+          <div className="flex flex-col items-center gap-[18px] sm:flex-row lg:flex-col">
             <CoverageDonut covered={d.kb.coveredDomains} total={d.kb.totalDomains} />
             <dl className="grid w-full flex-1 gap-3 text-xs text-ink-65">
               <div className="flex items-baseline justify-between">
@@ -265,8 +265,8 @@ export default async function DashboardPage() {
                   Thin domains
                   <b className="block text-[17px] text-ink">{thinCount}</b>
                 </dt>
-                <dd className="text-[11.5px] font-semibold text-amber">
-                  &lt; {COVERED_MIN_ENTRIES} entries
+                <dd className="text-[11.5px] font-semibold whitespace-nowrap text-amber">
+                  &lt; {COVERED_MIN_ENTRIES} each
                 </dd>
               </div>
             </dl>
