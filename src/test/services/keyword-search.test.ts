@@ -47,6 +47,9 @@ vi.mock("@/lib/ollama", () => ({
   ollamaChatWithBreaker: (...args: unknown[]) => chat(...args),
 }));
 
+import { hybridSearch, keywordSearch } from "@/lib/services/SearchService";
+import { generateAnswer } from "@/lib/services/AnswerGenerationService";
+
 beforeEach(() => {
   findMany.mockReset();
   chat.mockReset();
@@ -132,7 +135,6 @@ describe("rankEntries", () => {
 
 describe("keywordSearch / hybridSearch (embeddings off)", () => {
   it("keywordSearch returns the encryption entries top-ranked", async () => {
-    const { keywordSearch } = await import("@/lib/services/SearchService");
     const results = await keywordSearch("org-1", QUESTION, 5);
     expect(results.slice(0, 2).map((r) => r.id)).toEqual([
       AT_REST.id,
@@ -142,7 +144,6 @@ describe("keywordSearch / hybridSearch (embeddings off)", () => {
   });
 
   it("does not filter the database query by domain", async () => {
-    const { keywordSearch } = await import("@/lib/services/SearchService");
     await keywordSearch("org-1", QUESTION, 5, "DATA_PROTECTION" as never);
     const where = findMany.mock.calls[0][0].where;
     expect(where.domain).toBeUndefined();
@@ -150,7 +151,6 @@ describe("keywordSearch / hybridSearch (embeddings off)", () => {
   });
 
   it("hybridSearch falls back to keyword results when embeddings are off", async () => {
-    const { hybridSearch } = await import("@/lib/services/SearchService");
     const results = await hybridSearch("org-1", QUESTION, 5);
     expect(results[0].id).toBe(AT_REST.id);
     expect(results[0].source).toBe("keyword");
@@ -162,9 +162,6 @@ describe("generateAnswer", () => {
     chat.mockResolvedValue({
       choices: [{ message: { content: "Yes. Data at rest is encrypted with AES-256." } }],
     });
-    const { generateAnswer } = await import(
-      "@/lib/services/AnswerGenerationService"
-    );
 
     const result = await generateAnswer("q-1", "org-1", {
       question: {

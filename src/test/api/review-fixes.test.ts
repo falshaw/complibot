@@ -10,17 +10,20 @@ import { NextRequest } from "next/server";
  *  - the interview "skip" reply never becomes a knowledge-base entry
  */
 
-const db = {
-  interviewSession: { findFirst: vi.fn(), update: vi.fn() },
-  knowledgeEntry: { findFirst: vi.fn(), delete: vi.fn(() => "kb-delete") },
-  answer: { findFirst: vi.fn(), update: vi.fn(), count: vi.fn() },
-  answerSource: { deleteMany: vi.fn(() => "sources-delete"), createMany: vi.fn() },
-  organization: { findUnique: vi.fn(async () => ({ confidenceThreshold: 0.8 })) },
-  question: { count: vi.fn() },
-  questionnaire: { update: vi.fn() },
-  auditLog: { create: vi.fn() },
-  $transaction: vi.fn(async (ops: unknown[]) => ops),
-};
+const { db, generateAnswer } = vi.hoisted(() => ({
+  generateAnswer: vi.fn(),
+  db: {
+    interviewSession: { findFirst: vi.fn(), update: vi.fn() },
+    knowledgeEntry: { findFirst: vi.fn(), delete: vi.fn(() => "kb-delete") },
+    answer: { findFirst: vi.fn(), update: vi.fn(), count: vi.fn() },
+    answerSource: { deleteMany: vi.fn(() => "sources-delete"), createMany: vi.fn() },
+    organization: { findUnique: vi.fn(async () => ({ confidenceThreshold: 0.8 })) },
+    question: { count: vi.fn() },
+    questionnaire: { update: vi.fn() },
+    auditLog: { create: vi.fn() },
+    $transaction: vi.fn(async (ops: unknown[]) => ops),
+  },
+}));
 
 vi.mock("@/lib/prisma", () => ({ default: db, prisma: db }));
 vi.mock("@/lib/session", () => ({
@@ -28,7 +31,6 @@ vi.mock("@/lib/session", () => ({
     user: { id: "u-1", role: "ADMIN", organizationId: "org-1", email: "a@x.test" },
   })),
 }));
-const generateAnswer = vi.fn();
 vi.mock("@/lib/services/AnswerGenerationService", () => ({
   generateAnswer: (...a: unknown[]) => generateAnswer(...a),
 }));
@@ -36,6 +38,16 @@ vi.mock("@/lib/rateLimit", () => ({
   applyRateLimit: vi.fn(async () => null),
   RATE_LIMITS: { api: {}, read: {}, ai: {}, upload: {}, expensive: {} },
 }));
+
+import { GET as interviewGET } from "@/app/api/interview/[id]/route";
+import { POST as interviewComplete } from "@/app/api/interview/[id]/complete/route";
+import { POST as interviewRespond } from "@/app/api/interview/[id]/respond/route";
+import { DELETE as knowledgeDELETE } from "@/app/api/knowledge/[id]/route";
+import { POST as rejectPOST } from "@/app/api/answers/[id]/reject/route";
+import { POST as approvePOST } from "@/app/api/answers/[id]/approve/route";
+import { POST as regeneratePOST } from "@/app/api/answers/[id]/regenerate/route";
+import { audit } from "@/lib/audit";
+import { isSkipResponse, SKIP_RESPONSE } from "@/lib/services/InterviewService";
 
 const req = (url: string, init?: ConstructorParameters<typeof NextRequest>[1]) =>
   new NextRequest(`http://localhost${url}`, init);
@@ -46,7 +58,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("interview sessions are organization-scoped", () => {
   it("GET returns 404 for a session of another organization", async () => {
     db.interviewSession.findFirst.mockResolvedValue(null);
-    const { GET } = await import("@/app/api/interview/[id]/route");
+    const GET = interviewGET;
 
     const res = await GET(req("/api/interview/s-9"), ctx("s-9"));
 
@@ -59,7 +71,7 @@ describe("interview sessions are organization-scoped", () => {
 
   it("complete refuses a foreign session and changes nothing", async () => {
     db.interviewSession.findFirst.mockResolvedValue(null);
-    const { POST } = await import("@/app/api/interview/[id]/complete/route");
+    const POST = interviewComplete;
 
     const res = await POST(req("/api/interview/s-9/complete", { method: "POST" }), ctx("s-9"));
 
@@ -69,7 +81,7 @@ describe("interview sessions are organization-scoped", () => {
 
   it("respond refuses a foreign session", async () => {
     db.interviewSession.findFirst.mockResolvedValue(null);
-    const { POST } = await import("@/app/api/interview/[id]/respond/route");
+    const POST = interviewRespond;
 
     const res = await POST(
       req("/api/interview/s-9/respond", {
@@ -86,7 +98,7 @@ describe("interview sessions are organization-scoped", () => {
 describe("knowledge entry delete", () => {
   it("removes the entry's citations and the entry in one transaction", async () => {
     db.knowledgeEntry.findFirst.mockResolvedValue({ id: "kb-1", question: "Do you encrypt data at rest?" });
-    const { DELETE } = await import("@/app/api/knowledge/[id]/route");
+    const DELETE = knowledgeDELETE;
 
     const res = await DELETE(req("/api/knowledge/kb-1", { method: "DELETE" }), ctx("kb-1"));
 
@@ -106,7 +118,7 @@ describe("review actions", () => {
   });
 
   it("reject refreshes approved/rejected counts and is audited", async () => {
-    const { POST } = await import("@/app/api/answers/[id]/reject/route");
+    const POST = rejectPOST;
 
     const res = await POST(req("/api/answers/a-1/reject", { method: "POST", body: "{}" }), ctx("a-1"));
 
@@ -125,7 +137,7 @@ describe("review actions", () => {
   });
 
   it("approve refreshes the counts and is audited", async () => {
-    const { POST } = await import("@/app/api/answers/[id]/approve/route");
+    const POST = approvePOST;
 
     await POST(req("/api/answers/a-1/approve", { method: "POST" }), ctx("a-1"));
 
@@ -140,7 +152,7 @@ describe("regenerate", () => {
     db.answer.update.mockImplementation(async ({ data }) => ({ id: "a-1", ...data }));
     db.question.count.mockResolvedValue(1);
     db.answer.count.mockResolvedValue(0);
-    const { POST } = await import("@/app/api/answers/[id]/regenerate/route");
+    const POST = regeneratePOST;
 
     generateAnswer.mockResolvedValueOnce({ content: "Yes.", confidence: 0.39, sourceIds: [] });
     await POST(req("/api/answers/a-1/regenerate", { method: "POST" }), ctx("a-1"));
@@ -155,7 +167,6 @@ describe("regenerate", () => {
 describe("audit()", () => {
   it("swallows a failed write instead of failing the action", async () => {
     db.auditLog.create.mockRejectedValueOnce(new Error("db down"));
-    const { audit } = await import("@/lib/audit");
 
     await expect(audit({ organizationId: "org-1", action: "x.y" })).resolves.toBeUndefined();
   });
@@ -163,7 +174,6 @@ describe("audit()", () => {
 
 describe("interview skip", () => {
   it("recognises the skip reply the UI sends", async () => {
-    const { isSkipResponse, SKIP_RESPONSE } = await import("@/lib/services/InterviewService");
     expect(isSkipResponse(SKIP_RESPONSE)).toBe(true);
     expect(isSkipResponse("  skip. ")).toBe(true);
     expect(isSkipResponse("We skip nothing: all laptops use BitLocker")).toBe(false);

@@ -13,6 +13,8 @@ vi.mock("@/lib/ollama", () => ({
   ollamaChatWithBreaker: vi.fn(),
 }));
 
+import { resolveColumnMapping, parseCSV } from "@/lib/services/QuestionnaireParserService";
+
 describe("detectQuestionColumn", () => {
   it("finds a 'Question' header in any column", () => {
     const rows = [
@@ -96,9 +98,6 @@ describe("resolveColumnMapping", () => {
       file,
       "Question,Notes\nDo you encrypt customer data at rest?,\nDo you enforce MFA?,\n",
     );
-    const { resolveColumnMapping, parseCSV } = await import(
-      "@/lib/services/QuestionnaireParserService"
-    );
     const mapping = await resolveColumnMapping(file, {});
     expect(mapping).toMatchObject({ questionCol: "A", headerRow: 1 });
     const questions = await parseCSV(file, mapping);
@@ -109,9 +108,6 @@ describe("resolveColumnMapping", () => {
   });
 
   it("keeps an explicit questionCol (normalised to upper case)", async () => {
-    const { resolveColumnMapping } = await import(
-      "@/lib/services/QuestionnaireParserService"
-    );
     await expect(resolveColumnMapping("unused.csv", { questionCol: "b" }))
       .resolves.toMatchObject({ questionCol: "B" });
     await expect(

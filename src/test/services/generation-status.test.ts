@@ -50,6 +50,16 @@ vi.mock("@/lib/ollama", () => ({
   ollamaChatWithBreaker: (...a: unknown[]) => chat(...a),
 }));
 
+import {
+  generateQuestionnaireAnswers,
+  generationConcurrency,
+} from "@/lib/services/AnswerGenerationService";
+import { canStartGeneration, STALE_GENERATION_MS } from "@/lib/services/generationGate";
+import {
+  parseQuestionnaire,
+  QuestionnaireParseError,
+} from "@/lib/services/QuestionnaireParserService";
+
 const QUESTIONS = [
   { id: "q1", questionText: "Do you encrypt data at rest?", questionType: "YES_NO", domain: "ENCRYPTION", rowIndex: 2 },
   { id: "q2", questionText: "Do you run vulnerability scans?", questionType: "YES_NO", domain: "GENERAL", rowIndex: 3 },
@@ -73,9 +83,6 @@ beforeEach(() => {
 describe("generateQuestionnaireAnswers status", () => {
   it("returns to PARSED (retryable) when no answer could be generated", async () => {
     chat.mockRejectedValue(new Error("model 'qwen2.5:7b' not found"));
-    const { generateQuestionnaireAnswers } = await import(
-      "@/lib/services/AnswerGenerationService"
-    );
 
     const result = await generateQuestionnaireAnswers("qn-1", "org-1");
 
@@ -90,9 +97,6 @@ describe("generateQuestionnaireAnswers status", () => {
       .mockResolvedValueOnce({ choices: [{ message: { content: "Yes." } }] })
       .mockRejectedValueOnce(new Error("timeout"));
     questionCount.mockResolvedValue(1);
-    const { generateQuestionnaireAnswers } = await import(
-      "@/lib/services/AnswerGenerationService"
-    );
 
     const result = await generateQuestionnaireAnswers("qn-1", "org-1");
 
@@ -102,9 +106,6 @@ describe("generateQuestionnaireAnswers status", () => {
 
   it("only drafts questions that have no answer yet (retry fills gaps)", async () => {
     chat.mockResolvedValue({ choices: [{ message: { content: "Yes." } }] });
-    const { generateQuestionnaireAnswers } = await import(
-      "@/lib/services/AnswerGenerationService"
-    );
 
     await generateQuestionnaireAnswers("qn-1", "org-1");
 
@@ -116,9 +117,6 @@ describe("generateQuestionnaireAnswers status", () => {
 
   it("reports progress after every drafted answer", async () => {
     chat.mockResolvedValue({ choices: [{ message: { content: "Yes." } }] });
-    const { generateQuestionnaireAnswers } = await import(
-      "@/lib/services/AnswerGenerationService"
-    );
 
     await generateQuestionnaireAnswers("qn-1", "org-1");
 
@@ -131,9 +129,6 @@ describe("generateQuestionnaireAnswers status", () => {
 
 describe("generationConcurrency", () => {
   it("drafts one answer at a time on a local Ollama model", async () => {
-    const { generationConcurrency } = await import(
-      "@/lib/services/AnswerGenerationService"
-    );
     expect(generationConcurrency({})).toBe(1);
     expect(generationConcurrency({ LLM_PROVIDER: "ollama" })).toBe(1);
     expect(generationConcurrency({ LLM_PROVIDER: "claude" })).toBe(5);
@@ -145,7 +140,6 @@ describe("generationConcurrency", () => {
 describe("canStartGeneration", () => {
   const base = { totalQuestions: 4, answeredCount: 0, updatedAt: new Date(0) };
   it("starts a parsed questionnaire and fills gaps of a partial run", async () => {
-    const { canStartGeneration } = await import("@/lib/services/generationGate");
     expect(canStartGeneration({ ...base, status: "PARSED" })).toBe(true);
     expect(canStartGeneration({ ...base, status: "IN_REVIEW", answeredCount: 3 })).toBe(true);
     expect(canStartGeneration({ ...base, status: "IN_REVIEW", answeredCount: 4 })).toBe(false);
@@ -154,9 +148,6 @@ describe("canStartGeneration", () => {
   });
 
   it("recovers a run that stopped making progress, not a live one", async () => {
-    const { canStartGeneration, STALE_GENERATION_MS } = await import(
-      "@/lib/services/generationGate"
-    );
     const now = 10 * STALE_GENERATION_MS;
     const live = { ...base, status: "GENERATING", updatedAt: new Date(now - 60_000) };
     const stale = { ...base, status: "GENERATING", updatedAt: new Date(now - STALE_GENERATION_MS - 1) };
@@ -169,9 +160,6 @@ describe("parseQuestionnaire", () => {
   it("fails with a clear error and stays re-parseable when no questions are found", async () => {
     const file = path.join(tmpDir, "empty.csv");
     fs.writeFileSync(file, "Question,Answer\n");
-    const { parseQuestionnaire, QuestionnaireParseError } = await import(
-      "@/lib/services/QuestionnaireParserService"
-    );
 
     await expect(
       parseQuestionnaire("qn-1", file, { questionCol: "A" }),
@@ -188,9 +176,6 @@ describe("parseQuestionnaire", () => {
     const file = path.join(tmpDir, "one.csv");
     fs.writeFileSync(file, "Question\nDo you encrypt customer data at rest?\n");
     chat.mockRejectedValue(new Error("LLM down"));
-    const { parseQuestionnaire } = await import(
-      "@/lib/services/QuestionnaireParserService"
-    );
 
     const result = await parseQuestionnaire("qn-1", file, { questionCol: "A" });
 
