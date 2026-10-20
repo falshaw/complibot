@@ -2,7 +2,10 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { FileText, Table2, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { DeleteQuestionnaireButton } from "@/components/DeleteQuestionnaireButton";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { pct, questionnaireStatus } from "@/lib/ui/labels";
 
@@ -20,6 +23,8 @@ interface Questionnaire {
 
 export default function QuestionnairesPage() {
   const [items, setItems] = useState<Questionnaire[] | null>(null);
+  const role = useSession().data?.user?.role;
+  const canDelete = role === "ADMIN" || role === "RESPONDER";
 
   useEffect(() => {
     fetch("/api/questionnaires?limit=100")
@@ -71,6 +76,11 @@ export default function QuestionnairesPage() {
                 <th className="hidden sm:table-cell">Answered</th>
                 <th className="hidden sm:table-cell">Approved</th>
                 <th>Status</th>
+                {canDelete && (
+                  <th className="w-10">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -104,6 +114,18 @@ export default function QuestionnairesPage() {
                     <td>
                       <span className={`pill ${s.tone}`}>{s.label}</span>
                     </td>
+                    {canDelete && (
+                      <td className="text-right">
+                        <DeleteQuestionnaireButton
+                          questionnaire={q}
+                          variant="icon"
+                          onDeleted={() => {
+                            toast.success(`Deleted ${q.name}`);
+                            setItems((list) => list?.filter((x) => x.id !== q.id) ?? null);
+                          }}
+                        />
+                      </td>
+                    )}
                   </tr>
                 );
               })}

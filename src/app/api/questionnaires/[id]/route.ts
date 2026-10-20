@@ -1,3 +1,5 @@
+import { promises as fs } from "fs";
+import path from "path";
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
@@ -48,10 +50,16 @@ export const GET = apiHandler(async ({ params, organizationId }) => {
 });
 
 // DELETE /api/questionnaires/[id]
+// Removes the questionnaire with its questions, answers and citations (by
+// cascade) and its export records, in one transaction, then the stored files.
 export const DELETE = apiHandler(
   async ({ req, params, user, organizationId }) => {
     const questionnaire = await prisma.questionnaire.findUnique({
       where: { id: params.id, organizationId },
+      include: {
+        exports: { select: { filePath: true } },
+        _count: { select: { questions: true } },
+      },
     });
 
     if (!questionnaire) {
@@ -61,14 +69,34 @@ export const DELETE = apiHandler(
       );
     }
 
-    await prisma.questionnaire.delete({ where: { id: params.id } });
+    const answers = await prisma.answer.count({
+      where: { question: { questionnaireId: params.id } },
+    });
+
+    await prisma.$transaction([
+      prisma.questionnaireExport.deleteMany({
+        where: { questionnaireId: params.id },
+      }),
+      prisma.questionnaire.delete({ where: { id: params.id } }),
+    ]);
+
+    await removeStoredFiles([
+      questionnaire.filePath,
+      ...questionnaire.exports.map((e) => e.filePath),
+    ]);
+
     await audit({
       organizationId,
       userId: user.id,
       action: "questionnaire.delete",
       entityType: "Questionnaire",
       entityId: params.id,
-      details: { name: questionnaire.name },
+      details: {
+        name: questionnaire.name,
+        questions: questionnaire._count.questions,
+        answers,
+        exports: questionnaire.exports.length,
+      },
       req,
     });
 
@@ -76,3 +104,14 @@ export const DELETE = apiHandler(
   },
   { roles: ["ADMIN", "RESPONDER"] },
 );
+
+/** Best effort: only files inside the uploads directory are removed. */
+async function removeStoredFiles(paths: Array<string | null>) {
+  const root = path.resolve(process.cwd(), "uploads") + path.sep;
+  for (const p of paths) {
+    if (!p) continue;
+    const resolved = path.resolve(p);
+    if (!resolved.startsWith(root)) continue;
+    await fs.unlink(resolved).catch(() => undefined);
+  }
+}
