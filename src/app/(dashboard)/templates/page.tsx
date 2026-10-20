@@ -1,14 +1,18 @@
 /**
  * CompliBot - Questionnaire templates (CB-03)
- * Built-in + custom templates: start an assessment, clone, preview questions.
+ * Built-in + custom templates: start an assessment, copy, preview questions.
+ * Custom templates (copies) can be edited and deleted; built-ins are read-only.
  */
 
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Eye, Loader2, Play, Search, X } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { Copy, Eye, Loader2, Pencil, Play, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { TemplateEditor, type EditableTemplate } from "@/components/TemplateEditor";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel, typeLabel } from "@/lib/ui/labels";
 
@@ -31,6 +35,17 @@ interface Template {
   questions?: TemplateQuestion[];
 }
 
+async function fetchTemplates(): Promise<Template[]> {
+  try {
+    const res = await fetch("/api/templates");
+    const json = await res.json();
+    return json.success ? json.templates : [];
+  } catch {
+    toast.error("Could not load templates");
+    return [];
+  }
+}
+
 export default function TemplatesPage() {
   const router = useRouter();
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -39,20 +54,54 @@ export default function TemplatesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [preview, setPreview] = useState<Template | null>(null);
 
+  const [editing, setEditing] = useState<EditableTemplate | null>(null);
+  const [deleting, setDeleting] = useState<Template | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const role = useSession().data?.user?.role;
+  const canWrite = role === "ADMIN" || role === "RESPONDER";
+
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/templates");
-      const json = await res.json();
-      setTemplates(json.success ? json.templates : []);
-    } catch {
-      setTemplates([]);
-      toast.error("Could not load templates");
-    }
+    setTemplates(await fetchTemplates());
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    fetchTemplates().then((t) => !cancelled && setTemplates(t));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function openEditor(t: Template) {
+    setBusy(`edit-${t.id}`);
+    try {
+      const res = await fetch(`/api/templates/${t.id}`);
+      const json = await res.json();
+      if (!json.success) throw new Error();
+      setEditing(json.template);
+    } catch {
+      toast.error("Could not load the template");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove() {
+    if (!deleting) return;
+    setBusy(`delete-${deleting.id}`);
+    setDeleteError("");
+    const res = await fetch(`/api/templates/${deleting.id}`, { method: "DELETE" }).catch(() => null);
+    setBusy(null);
+    if (!res?.ok) {
+      setDeleteError(
+        res?.status === 403 ? "Only admins and responders can delete templates." : "The template was not deleted. Try again.",
+      );
+      return;
+    }
+    toast.success(`Deleted “${deleting.name}”`);
+    setDeleting(null);
+    await load();
+  }
 
   async function openPreview(id: string) {
     setBusy(`preview-${id}`);
@@ -170,9 +219,31 @@ export default function TemplatesPage() {
                       <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => openPreview(t.id)} disabled={!!busy} aria-label={`Preview ${t.name}`} title="Preview questions">
                         {busy === `preview-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
                       </button>
-                      <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => clone(t)} disabled={!!busy} aria-label={`Copy ${t.name} to your templates`} title="Copy to your templates">
-                        {busy === `clone-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
-                      </button>
+                      {canWrite && t.isBuiltIn && (
+                        <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => clone(t)} disabled={!!busy} aria-label={`Copy ${t.name} to your templates`} title="Copy to your templates">
+                          {busy === `clone-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+                        </button>
+                      )}
+                      {canWrite && !t.isBuiltIn && (
+                        <>
+                          <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => openEditor(t)} disabled={!!busy} aria-label={`Edit ${t.name}`} title="Edit template">
+                            {busy === `edit-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Pencil className="h-3.5 w-3.5" aria-hidden />}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm !px-3"
+                            onClick={() => {
+                              setDeleteError("");
+                              setDeleting(t);
+                            }}
+                            disabled={!!busy}
+                            aria-label={`Delete ${t.name}`}
+                            title="Delete template"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </article>
                 ))}
@@ -182,6 +253,33 @@ export default function TemplatesPage() {
       )}
 
       {preview && <PreviewModal template={preview} busy={busy} onClose={() => setPreview(null)} onStart={() => start(preview)} />}
+
+      {editing && (
+        <TemplateEditor
+          template={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async (name) => {
+            setEditing(null);
+            toast.success(`Saved “${name}”`);
+            await load();
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete this template?"
+        confirmLabel="Delete template"
+        busy={!!busy}
+        error={deleteError}
+        onConfirm={remove}
+        onCancel={() => setDeleting(null)}
+      >
+        <p>
+          <b className="text-ink">{deleting?.name}</b> and its {deleting?.questionCount} questions will be removed from your
+          templates. Assessments already started from it keep their questions. This cannot be undone.
+        </p>
+      </ConfirmDialog>
     </>
   );
 }
