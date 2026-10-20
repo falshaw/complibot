@@ -211,6 +211,7 @@ See `.env.example` for all variables.
 npm install            # also runs prisma generate
 npm run typecheck
 npm test               # Vitest
+npm run lint
 npm run build
 ```
 

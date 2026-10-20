@@ -11,8 +11,6 @@ import { sanitizeForPrompt } from "@/lib/sanitize";
 import { ollamaChatWithBreaker, OLLAMA_MODEL } from "@/lib/ollama";
 import type { QuestionType, SecurityDomain } from "@prisma/client";
 
-const PROMPT_VERSION = "2026-03-01";
-
 /** Number of top-scored knowledge entries passed to the LLM as context. */
 const MAX_CONTEXT_ENTRIES = 5;
 

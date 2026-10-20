@@ -8,7 +8,6 @@ import {
   BookOpen,
   FileText,
   CheckCircle,
-  AlertCircle,
   Upload,
   MessageSquare,
   Activity,
