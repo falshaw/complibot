@@ -68,7 +68,7 @@ export default function QuestionnairesPage() {
         </EmptyState>
       ) : (
         <div className="card overflow-x-auto">
-          <table className="data-table">
+          <table className="data-table max-sm:[&_td]:px-3 max-sm:[&_th]:px-3">
             <thead>
               <tr>
                 <th>Questionnaire</th>
@@ -89,8 +89,8 @@ export default function QuestionnairesPage() {
                 const p = pct(q.approvedCount, q.totalQuestions);
                 return (
                   <tr key={q.id}>
-                    <td className="max-w-[280px]">
-                      <Link href={`/questionnaires/${q.id}`} className="block truncate font-semibold hover:text-accent">
+                    <td>
+                      <Link href={`/questionnaires/${q.id}`} className="block max-w-[130px] truncate font-semibold hover:text-accent sm:max-w-[280px]">
                         {q.name}
                       </Link>
                       <div className="text-xs text-ink-45">
