@@ -1,9 +1,7 @@
 import { defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
-  plugins: [react()],
   test: {
     // No test renders components; the one that needs `window` opts into jsdom
     // with a @vitest-environment docblock. jsdom per file was most of the
