@@ -375,7 +375,7 @@ export default function QuestionnaireReviewPage() {
         <li className={steps.generate ? "done" : steps.parse ? "on" : ""}>3 Generate</li>
         <li className={steps.exported ? "done" : steps.review ? "on" : ""}>4 Review</li>
         <li className={steps.exported ? "on" : ""}>
-          {q.answeredCount > 0 ? <Link href={`/questionnaires/${id}/export`}>5 Export</Link> : "5 Export"}
+          {canDraft && q.answeredCount > 0 ? <Link href={`/questionnaires/${id}/export`}>5 Export</Link> : "5 Export"}
         </li>
       </ol>
 
