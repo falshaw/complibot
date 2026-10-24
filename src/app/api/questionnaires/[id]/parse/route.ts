@@ -9,6 +9,7 @@ import {
   type ColumnMapping,
 } from "@/lib/services/QuestionnaireParserService";
 import { RATE_LIMITS } from "@/lib/rateLimit";
+import { withModelBatch } from "@/lib/ollama";
 
 // POST /api/questionnaires/[id]/parse - Trigger parsing
 export const POST = apiHandler(
@@ -48,19 +49,18 @@ export const POST = apiHandler(
           : {};
     }
 
+    const filePath = questionnaire.filePath;
     let result: { questionCount: number };
     try {
-      result = await parseQuestionnaire(
-        questionnaire.id,
-        questionnaire.filePath,
-        {
+      result = await withModelBatch(() =>
+        parseQuestionnaire(questionnaire.id, filePath, {
           questionCol:
             typeof mapping.questionCol === "string" ? mapping.questionCol : undefined,
           headerRow:
             typeof mapping.headerRow === "number" ? mapping.headerRow : undefined,
           sheetName:
             typeof mapping.sheetName === "string" ? mapping.sheetName : undefined,
-        },
+        }),
       );
     } catch (error) {
       if (error instanceof QuestionnaireParseError) {

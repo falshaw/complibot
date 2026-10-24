@@ -65,6 +65,36 @@ async function generateViaClaudeBridge(
   return data.response ?? "";
 }
 
+// A local 31B model holds ~20 GB of RAM while loaded and Ollama keeps it for
+// 5 minutes after the last call. Batch jobs (parse, generate all, KB import)
+// unload it as soon as they finish; single calls (regenerate, interview)
+// keep Ollama's default so the next click does not wait for a reload.
+// OLLAMA_RELEASE_AFTER_BATCH=false keeps the model loaded.
+const RELEASE_AFTER_BATCH =
+  (process.env.OLLAMA_RELEASE_AFTER_BATCH ?? "true").toLowerCase() !== "false";
+let activeBatches = 0;
+
+/** Run a batch job; unload the chat model when the last running batch ends. */
+export async function withModelBatch<T>(job: () => Promise<T>): Promise<T> {
+  activeBatches++;
+  try {
+    return await job();
+  } finally {
+    activeBatches--;
+    if (activeBatches === 0 && RELEASE_AFTER_BATCH && LLM_PROVIDER === "ollama") {
+      // Best effort: an empty generate with keep_alive 0 unloads the model.
+      await fetch(`${OLLAMA_HOST}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: OLLAMA_MODEL, keep_alive: 0 }),
+        signal: AbortSignal.timeout(10_000),
+      })
+        .then(() => logger.info("Released the local model after a batch", { model: OLLAMA_MODEL }))
+        .catch(() => {});
+    }
+  }
+}
+
 // Singleton OpenAI client pointing at Ollama
 let _openai: OpenAI | null = null;
 

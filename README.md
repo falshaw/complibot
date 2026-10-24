@@ -254,6 +254,7 @@ See `.env.example` for all variables.
 | `EMBEDDING_MODEL` | no | default `nomic-embed-text`; `none` = keyword search only |
 | `LLM_CONCURRENCY` | no | answers drafted in parallel; default 1 on Ollama, 5 on the Claude bridge |
 | `OLLAMA_REASONING_EFFORT` | no | default `none`: turns thinking off for reasoning models (gemma4, qwen3, ...), which otherwise spend the token budget on hidden reasoning; empty = parameter not sent |
+| `OLLAMA_RELEASE_AFTER_BATCH` | no | default `true`: unload the chat model when a batch (parse, generate all, knowledge import) finishes, so a large local model frees its RAM at once; single calls keep Ollama's 5-minute keep-alive. `false` = keep it loaded |
 | `CLAUDE_BRIDGE_URL`, `CLAUDE_BRIDGE_TOKEN`, `CLAUDE_MODEL` | no | only for `LLM_PROVIDER=claude` |
 | `COMPLIBOT_PORT`, `COMPLIBOT_DB_PORT`, `COMPLIBOT_REDIS_PORT` | no | host ports on 127.0.0.1 (3005, 5437, 6384) |
 | `NEXTAUTH_URL` | no | the URL you open in the browser; keep in sync with `COMPLIBOT_PORT` |
