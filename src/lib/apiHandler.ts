@@ -46,8 +46,12 @@ export function apiHandler<T = unknown>(
     auth: requireAuth = true,
     roles,
     rateLimit = RATE_LIMITS.api,
-    rateLimitPrefix = "api",
   } = options;
+  // Each limit counts in its own bucket: sharing one counter would let
+  // ordinary page loads use up the 5-per-minute upload allowance.
+  const rateLimitPrefix =
+    options.rateLimitPrefix ??
+    (Object.entries(RATE_LIMITS).find(([, c]) => c === rateLimit)?.[0] || "api");
 
   return async (
     req: NextRequest,
