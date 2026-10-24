@@ -10,6 +10,7 @@ import { domainLabel, pct } from "@/lib/ui/labels";
 
 interface Preview {
   name: string;
+  fileName: string | null;
   totalQuestions: number;
   approvedCount: number;
   answeredCount: number;
@@ -23,6 +24,7 @@ interface ApiQuestion {
 }
 
 const FORMATS = [
+  { id: "filled", label: "Fill the uploaded file", hint: "Your customer's own file, with the answers in its response column" },
   { id: "xlsx", label: "Excel workbook", hint: "Question, answer, status, confidence and sources per row (.xlsx)" },
   { id: "txt", label: "Text report", hint: "Readable report grouped by question, with cited sources (.txt)" },
 ] as const;
@@ -57,6 +59,7 @@ export default function ExportPage() {
       }
       setPreview({
         name: data.name,
+        fileName: data.fileName ?? null,
         totalQuestions: data.totalQuestions,
         approvedCount: data.approvedCount,
         answeredCount: answered,
@@ -72,7 +75,10 @@ export default function ExportPage() {
     setExporting(format);
     try {
       const res = await fetch(`/api/questionnaires/${id}/export?format=${format}`, { method: "POST" });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Export failed");
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -83,8 +89,8 @@ export default function ExportPage() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success("Export downloaded");
-    } catch {
-      toast.error("Export failed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
     } finally {
       setExporting(null);
     }
@@ -146,7 +152,8 @@ export default function ExportPage() {
           </ul>
           {!allApproved && (
             <p className="alert alert-warn mt-4">
-              Answers that are not approved are still exported, with their status in the file.
+              Only approved answers are exported. Questions without an approved answer stay empty in the
+              file; the workbook and the report name their status.
             </p>
           )}
         </section>
@@ -169,7 +176,7 @@ export default function ExportPage() {
       <section className="card mt-4 p-5">
         <h2 className="mb-3">Download</h2>
         <div className="grid gap-3 sm:grid-cols-2">
-          {FORMATS.map((f) => (
+          {FORMATS.filter((f) => f.id !== "filled" || preview.fileName).map((f) => (
             <button
               key={f.id}
               type="button"

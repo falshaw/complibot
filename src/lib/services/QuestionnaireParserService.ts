@@ -10,6 +10,7 @@ import { classifyDomain } from "./AnswerGenerationService";
 import { detectQuestionType } from "./questionType";
 import { logger } from "@/lib/logger";
 import { detectQuestionColumn } from "./columnDetection";
+import { refreshEntryEmbedding } from "./EmbeddingService";
 import * as fs from "fs";
 
 export interface ColumnMapping {
@@ -309,7 +310,7 @@ export async function ingestQuestionnaireAsKB(
   for (const q of withAnswers) {
     const domain = await classifyDomain(q.questionText);
 
-    await prisma.knowledgeEntry.create({
+    const entry = await prisma.knowledgeEntry.create({
       data: {
         organizationId,
         sourceId,
@@ -319,6 +320,7 @@ export async function ingestQuestionnaireAsKB(
         keywords: extractKeywords(q.questionText),
       },
     });
+    await refreshEntryEmbedding(entry.id, entry.question, entry.answer);
     entriesCreated++;
   }
 

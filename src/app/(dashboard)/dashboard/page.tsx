@@ -70,10 +70,10 @@ function Stat({
   );
 }
 
-function CoverageDonut({ covered, total }: { covered: number; total: number }) {
+function CoverageDonut({ score, withEntries, total }: { score: number; withEntries: number; total: number }) {
   const r = 58;
   const c = 2 * Math.PI * r;
-  const share = total > 0 ? covered / total : 0;
+  const share = score / 100;
   return (
     <svg
       width="150"
@@ -81,7 +81,7 @@ function CoverageDonut({ covered, total }: { covered: number; total: number }) {
       viewBox="0 0 150 150"
       className="shrink-0"
       role="img"
-      aria-label={`Knowledge base covers ${covered} of ${total} domains`}
+      aria-label={`Knowledge base coverage ${score}%, ${withEntries} of ${total} domains have entries`}
     >
       <circle cx="75" cy="75" r={r} fill="none" stroke="var(--track)" strokeWidth="16" />
       {share > 0 && (
@@ -99,10 +99,10 @@ function CoverageDonut({ covered, total }: { covered: number; total: number }) {
         />
       )}
       <text x="75" y="76" textAnchor="middle" fontWeight="700" fontSize="28" fill="var(--ink)">
-        {Math.round(share * 100)}%
+        {score}%
       </text>
       <text x="75" y="96" textAnchor="middle" fontSize="11" fill="var(--ink-45)">
-        {covered} / {total} domains
+        {withEntries} of {total} domains
       </text>
     </svg>
   );
@@ -127,7 +127,7 @@ export default async function DashboardPage() {
     .slice(0, 2);
   const gapRows = [...thin, ...strong];
   const maxDomain = Math.max(1, ...d.kb.perDomain.map((x) => x.count));
-  const thinCount = d.kb.totalDomains - d.kb.coveredDomains;
+  const thinCount = d.kb.thinDomains;
   const firstAwaiting = d.awaiting[0];
 
   return (
@@ -237,7 +237,7 @@ export default async function DashboardPage() {
 
         <Tile title="KB coverage" chip={`${d.kb.totalDomains} domains`}>
           <div className="flex flex-col items-center gap-[18px] sm:flex-row lg:flex-col">
-            <CoverageDonut covered={d.kb.coveredDomains} total={d.kb.totalDomains} />
+            <CoverageDonut score={d.kb.coverageScore} withEntries={d.kb.domainsWithEntries} total={d.kb.totalDomains} />
             <dl className="grid w-full flex-1 gap-3 text-xs text-ink-65">
               <div className="flex items-baseline justify-between">
                 <dt>

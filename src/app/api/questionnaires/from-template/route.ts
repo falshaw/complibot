@@ -8,6 +8,7 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { assessmentName } from "@/lib/services/assessmentName";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 
 const fromTemplateSchema = z.object({
@@ -99,5 +100,5 @@ export const POST = apiHandler(
       { status: 201 },
     );
   },
-  { schema: fromTemplateSchema },
+  { roles: rolesFor("draft"), schema: fromTemplateSchema },
 );

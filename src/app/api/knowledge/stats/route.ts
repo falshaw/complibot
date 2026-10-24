@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
 import prisma from "@/lib/prisma";
+import { COVERAGE_DOMAINS, LEVEL_MIN, coverageScore } from "@/lib/coverage";
 
 // GET /api/knowledge/stats - KB coverage metrics
 export const GET = apiHandler(async ({ organizationId }) => {
@@ -24,41 +25,13 @@ export const GET = apiHandler(async ({ organizationId }) => {
     {} as Record<string, number>,
   );
 
-  const allDomains = [
-    "ACCESS_CONTROL",
-    "AUTHENTICATION",
-    "ENCRYPTION",
-    "DATA_PROTECTION",
-    "INCIDENT_RESPONSE",
-    "NETWORK_SECURITY",
-    "CLOUD_SECURITY",
-    "PHYSICAL_SECURITY",
-    "BUSINESS_CONTINUITY",
-    "CHANGE_MANAGEMENT",
-    "VULNERABILITY_MANAGEMENT",
-    "LOGGING_MONITORING",
-    "THIRD_PARTY_RISK",
-    "COMPLIANCE",
-    "PRIVACY",
-    "ENDPOINT_SECURITY",
-    "APPLICATION_SECURITY",
-    "IDENTITY_MANAGEMENT",
-    "GOVERNANCE",
-    "GENERAL",
-  ];
-
-  const coveredDomains = allDomains.filter(
-    (d) => (domainCoverage[d] || 0) >= 3,
-  );
-
   return NextResponse.json({
     totalEntries,
     verifiedEntries,
     domainCoverage,
-    coveredDomains: coveredDomains.length,
-    totalDomains: allDomains.length,
-    coveragePercent: Math.round(
-      (coveredDomains.length / allDomains.length) * 100,
-    ),
+    // domains with at least LEVEL_MIN.adequate entries; percent = coverage.ts score
+    coveredDomains: COVERAGE_DOMAINS.filter((d) => (domainCoverage[d] ?? 0) >= LEVEL_MIN.adequate).length,
+    totalDomains: COVERAGE_DOMAINS.length,
+    coveragePercent: coverageScore(domainCoverage),
   });
 });

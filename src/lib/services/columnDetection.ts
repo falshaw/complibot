@@ -99,3 +99,28 @@ export function detectQuestionColumn(
   }
   return null;
 }
+
+const ANSWER_HEADER_PATTERNS = [
+  /^(vendor |supplier |your )?(responses?|answers?)$/,
+  /^repl(y|ies)$/,
+  /^antworte?n?$/,
+  /^rückmeldung$/,
+];
+
+/**
+ * 0-based column where answers go when the customer's own file is filled in:
+ * a header named like "Response" / "Answer" / "Antwort", else the first
+ * column after the last used header cell (never the question column).
+ */
+export function detectAnswerColumn(header: unknown[], questionColIndex: number): number {
+  for (let col = 0; col < header.length; col++) {
+    if (col !== questionColIndex && ANSWER_HEADER_PATTERNS.some((p) => p.test(normalise(header[col])))) {
+      return col;
+    }
+  }
+  let last = -1;
+  header.forEach((c, i) => {
+    if (normalise(c) !== "") last = i;
+  });
+  return Math.max(last + 1, questionColIndex + 1);
+}

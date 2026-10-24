@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { generateQuestionnaireAnswers } from "@/lib/services/AnswerGenerationService";
 import { canStartGeneration } from "@/lib/services/generationGate";
@@ -74,5 +75,5 @@ export const POST = apiHandler(
       errors: result.errors,
     });
   },
-  { rateLimit: RATE_LIMITS.ai },
+  { roles: rolesFor("draft"), rateLimit: RATE_LIMITS.ai },
 );

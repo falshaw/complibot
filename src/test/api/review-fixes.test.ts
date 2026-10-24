@@ -111,7 +111,13 @@ describe("knowledge entry delete", () => {
 
 describe("review actions", () => {
   beforeEach(() => {
-    db.answer.findFirst.mockResolvedValue({ id: "a-1", question: { questionnaireId: "qn-1" } });
+    db.answer.findFirst.mockResolvedValue({
+      id: "a-1",
+      content: "All traffic uses TLS 1.3.",
+      editedContent: null,
+      _count: { sources: 1 },
+      question: { questionnaireId: "qn-1" },
+    });
     db.answer.update.mockImplementation(async ({ data }) => ({ id: "a-1", ...data }));
     db.question.count.mockResolvedValue(4);
     db.answer.count.mockImplementation(async ({ where }) => (where.status === "APPROVED" ? 2 : 1));

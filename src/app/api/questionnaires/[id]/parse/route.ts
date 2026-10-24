@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import {
   parseQuestionnaire,
@@ -83,5 +84,5 @@ export const POST = apiHandler(
       questionCount: result.questionCount,
     });
   },
-  { rateLimit: RATE_LIMITS.expensive },
+  { roles: rolesFor("draft"), rateLimit: RATE_LIMITS.expensive },
 );

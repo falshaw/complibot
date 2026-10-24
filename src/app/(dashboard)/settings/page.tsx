@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { plural } from "@/lib/ui/labels";
 
 interface OrgData {
   id: string;
@@ -75,7 +76,8 @@ export default function SettingsPage() {
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={255} required />
           </label>
           <p className="text-xs text-ink-65">
-            {org.knowledgeEntryCount} knowledge-base entries · {org.questionnaireCount} questionnaires · {org.userCount} users
+            {plural(org.knowledgeEntryCount, "knowledge-base entry", "knowledge-base entries")} · {plural(org.questionnaireCount, "questionnaire")} ·{" "}
+            {plural(org.userCount, "user")}
           </p>
           <div>
             <button type="submit" className="btn btn-primary btn-sm" disabled={!!saving || !name.trim() || name.trim() === org.name}>

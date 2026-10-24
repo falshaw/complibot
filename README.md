@@ -12,12 +12,12 @@ Security questionnaires repeat the same questions in different wording. Answerin
 
 - **Questionnaire upload and parsing**: Excel (`.xlsx`) and CSV. The question column is detected automatically (or set explicitly), questions are classified by type (yes/no, free text, date, numeric, evidence, multiple choice) and security domain (20 domains). Questionnaires can be deleted with everything drafted for them.
 - **RAG answer generation**: keyword search (always on) plus optional pgvector semantic search over the knowledge base. Weak matches are dropped before the LLM sees them, the LLM states which sources it used, and only those are cited. Each draft gets a confidence score that reflects how well the cited entries support it (see [How drafts are scored](#how-drafts-are-scored)).
-- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; drafts below the organization's threshold are flagged; approve, reject, edit or regenerate answers; bulk-approve.
-- **Export**: completed questionnaires to Excel or a text report.
+- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; drafts below the organization's threshold are flagged; approve, reject, edit or regenerate answers; bulk-approve (with a confirmation). An edited answer goes back to review, and a draft that says the knowledge base does not cover the question cannot be approved until someone writes the answer.
+- **Export**: only approved answers leave the app. **Fill the uploaded file** writes them into the customer's own spreadsheet (its Response column, same rows and layout); there is also a review workbook (answers with status, confidence and sources) and a text report.
 - **Knowledge base**: add, edit, verify and delete entries, import question/answer pairs from spreadsheets, search, per-domain stats, and a **gap analysis** that shows thin domains.
-- **Knowledge interview**: an AI-led interview that cycles through security domains and turns your replies into knowledge-base entries.
-- **Templates**: seeded questionnaire templates (SIG Lite, CAIQ v4, VSA, NIST CSF, ISO 27001, CIS Controls v8, SOC 2 readiness). Copy one to make your own, then edit or delete the copy; the built-ins are read-only.
-- **Teams and RBAC**: roles (admin, reviewer, responder, viewer), invitations by one-time join link (no email, no public sign-up), role changes, removing and reactivating members.
+- **Knowledge interview**: an AI-led interview that cycles through security domains and turns your replies into knowledge-base entries. When a reply already answers the next questions of a domain, those are skipped.
+- **Templates**: seven short sample question sets (12–18 questions each) modelled on the topics of SIG Lite, CAIQ, VSA, NIST CSF, ISO 27001, CIS Controls v8 and SOC 2. They are not the official or licensed questionnaires. Copy one to make your own, then edit or delete the copy; the built-ins are read-only.
+- **Teams and roles**: admin, reviewer, responder and viewer, enforced on every API route (see [Roles](#roles)); invitations by one-time join link (no email, no public sign-up), role changes, removing and reactivating members.
 - **Audit trail**: review decisions, knowledge-base changes, uploads, deletions, exports, template edits, settings and team changes, recorded per organization.
 - **Security**: CSRF protection in middleware, Redis-backed rate limiting, login lockout, input sanitization, AES-256-GCM field encryption, least-privilege database role, hardened containers (read-only root, dropped capabilities, resource limits).
 
@@ -96,9 +96,9 @@ Open http://localhost:3005 (or your `COMPLIBOT_PORT`) and sign in as `admin@demo
    ```
 
 2. **Parse questions**, then **Generate answers**. Generation calls the LLM once per question, one at a time on Ollama; on a laptop CPU/GPU expect seconds to a couple of minutes per answer depending on the model. The page shows progress while it runs.
-3. Review each draft with its confidence score and cited knowledge-base entries, approve, reject, edit or regenerate, then **Export** to Excel or a text report.
+3. Review each draft with its confidence score and cited knowledge-base entries, approve, reject, edit or regenerate, then **Export**: **Fill the uploaded file** returns the sample with its Response column filled in.
 
-To add knowledge in bulk, upload [`samples/knowledge-base-import.csv`](samples/knowledge-base-import.csv) under **Knowledge Base → Upload source** (question column A, answer column B). **Templates** creates a ready-parsed assessment from SIG Lite, CAIQ, ISO 27001, SOC 2 and others.
+To add knowledge in bulk, upload [`samples/knowledge-base-import.csv`](samples/knowledge-base-import.csv) under **Knowledge base → Upload source** (question column A, answer column B). **Templates** creates a ready-parsed assessment from one of the sample question sets.
 
 Stop with `docker compose down` (add `-v` to delete the database volume).
 
@@ -112,6 +112,19 @@ There is no public sign-up. The seed creates `admin@demo.com` (admin) and `revie
 The link works once and expires after 7 days. Only a SHA-256 hash of the token is stored, so a lost link cannot be read back: revoke the pending invitation and invite again. An email that already has an account cannot be invited.
 
 **Remove** blocks a member at once (their open sessions stop working on the next request) and keeps their answers, reviews and audit entries; **Reactivate** brings them back with the same role. Role changes also apply immediately.
+
+### Roles
+
+Every role can read everything in its organization. Writes:
+
+| Action | Admin | Reviewer | Responder | Viewer |
+|---|:-:|:-:|:-:|:-:|
+| Upload, parse and generate questionnaires; edit and regenerate drafts; export; templates | ✓ | ✓ | ✓ | |
+| Approve, reject and bulk-approve answers | ✓ | ✓ | | |
+| Knowledge base: add, edit, verify, delete, import; AI interview | ✓ | ✓ | | |
+| Delete a questionnaire; team and organization settings | ✓ | | | |
+
+The matrix lives in `src/lib/permissions.ts`; the API returns 403 for anything outside it, and the pages hide the buttons a role cannot use.
 
 ![Team page with a one-time join link, light theme](docs/team-invite-light.png)
 
@@ -133,7 +146,7 @@ Confidence (`src/lib/services/answerQuality.ts`) is
 
 halved when the draft says the knowledge base does not cover (part of) the question, and capped at 0.2 when nothing is cited. Drafts below the organization's threshold (**Settings**, default 0.8) are flagged for a closer look.
 
-On the sample questionnaire with `gemma4:31b`, the five drafts the demo knowledge base supports scored 0.82–0.93 and each cited the one entry it used; four questions the knowledge base cannot answer (FedRAMP, staff count, ISO audit date, bug bounty) were answered "not covered" and scored 0.
+On the five-question sample questionnaire with `gemma4:31b`, all five drafts scored 0.82–0.93 and each cited the one entry it used. On the 12-question VSA sample template, the six questions the demo knowledge base cannot answer were answered "not covered" and scored 0. Such a draft cannot be approved as it stands: someone writes the answer (or adds it to the knowledge base and regenerates) first.
 
 ![Answer review with confidence and the cited entry, dark theme](docs/review-dark.png)
 
@@ -154,7 +167,7 @@ To set the column explicitly, enter the column letter on the upload form, or sen
 | `questionCol` | string | detected | column letter holding the questions (`"A"`, `"B"`, `"AA"`) |
 | `headerRow` | number | `1` (detected) | number of header rows to skip |
 | `sheetName` | string | first sheet | Excel worksheet name |
-| `answerCol` | string | none | existing answers (knowledge-base import only) |
+| `answerCol` | string | detected | existing answers for a knowledge-base import; for a questionnaire, the column **Fill the uploaded file** writes into (default: a column headed Response, Answer, Reply or Antwort, else the first empty column) |
 
 ```bash
 # multipart upload with an explicit mapping
@@ -184,7 +197,7 @@ Larger models give better answers: `qwen2.5:7b` is a good default for 8 GB of VR
 
 Retrieval always runs a keyword search: stopwords are removed, terms are stemmed, each knowledge-base entry is scored (a match in the entry's question counts most, then its keywords, then its answer) and the best-scored entries are used. The question's classified domain only boosts matching entries, it never filters them out. This works with no embedding model at all.
 
-With `EMBEDDING_MODEL=nomic-embed-text` pulled in Ollama, complibot also runs pgvector cosine search and merges both result lists (reciprocal rank fusion). New entries from the knowledge interview are embedded automatically; for entries that already exist (like the demo data), re-run init after pulling the model:
+With `EMBEDDING_MODEL=nomic-embed-text` pulled in Ollama, complibot also runs pgvector cosine search and merges both result lists (reciprocal rank fusion). Entries added by hand, imported or created by the knowledge interview are embedded when they are saved, and an edited entry is embedded again. For entries that existed before the model was pulled (like the demo data), re-run init:
 
 ```bash
 docker compose run --rm complibot-init
@@ -204,7 +217,7 @@ Browser ── Next.js 16 (App Router, React 19)
                   ├─ EmbeddingService            optional Ollama embeddings (768-dim)
                   ├─ AnswerGenerationService     RAG prompt -> answer + confidence + sources
                   ├─ InterviewService            domain-cycling KB interview
-                  └─ ExportService               answers -> Excel / text report
+                  └─ ExportService               approved answers -> customer file / Excel / text report
 PostgreSQL 16 + pgvector (Prisma 7 with the PrismaPg adapter)
 Redis (rate limits, lockout, cache)
 Ollama or another LLM endpoint
@@ -265,7 +278,7 @@ npm run dev            # http://localhost:3005, uses DATABASE_URL / REDIS_* from
 
 `npm run db:seed` seeds from the host using `DATABASE_URL` in `.env`.
 
-Tests (Vitest, about 100, no database or LLM needed) cover keyword retrieval against the demo knowledge base, the relevance cut-off and confidence scoring (with real `gemma4:31b` drafts as fixtures), citation parsing, question-type detection, question-column detection, questionnaire status transitions, the invitation flow (hashed single-use tokens, expiry, password rules), member removal and reactivation, questionnaire and template deletion, organization scoping of the API routes and benchmark scoring. `npm run test:coverage` reports coverage.
+Tests (Vitest, about 225, no database or LLM needed) cover the role matrix on every write route, the approval and export rules, keyword retrieval against the demo knowledge base, the relevance cut-off and confidence scoring (with real `gemma4:31b` drafts as fixtures), citation parsing, question-type detection, question-column detection, questionnaire status transitions, the invitation flow (hashed single-use tokens, expiry, password rules), member removal and reactivation, questionnaire and template deletion, organization scoping of the API routes and benchmark scoring. `npm run test:coverage` reports coverage.
 
 `scripts/benchmark.ts` scores AI answers against reference answers (token-F1 per domain):
 
@@ -291,7 +304,7 @@ Be aware of what it does not do:
 - **Calibrated for the defaults.** The relevance scale and the confidence weights were tuned with `nomic-embed-text` and the demo knowledge base; another embedding model, or a very different knowledge base, may need other anchors in `relevance.ts`.
 - **No email.** Invitations are passed on as a link by the admin; there is no password reset by email either (an admin removes the member and invites them again).
 - **One organization per deployment in practice.** The data model has organizations, but there is no UI to create a second one or to move users between them.
-- **Uploaded files are temporary in Docker.** The app container keeps uploads on a tmpfs: parse a questionnaire before restarting the container (its questions and answers live in Postgres, the file does not).
+- **Uploaded files are temporary in Docker.** The app container keeps uploads on a tmpfs: parse a questionnaire before restarting the container (its questions and answers live in Postgres, the file does not). **Fill the uploaded file** needs the file too; after a restart, use the review workbook.
 - **Single instance.** Generation runs inside the web process, one answer at a time on Ollama by default; a long questionnaire on a laptop takes minutes, and it is not a job queue for many users at once.
 - **Production overlay untested in public.** `deploy/docker-compose.prod.yml` (Caddy + bundled Ollama) has not been validated on a public server.
 

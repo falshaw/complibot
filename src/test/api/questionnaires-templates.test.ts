@@ -49,6 +49,11 @@ beforeEach(() => {
 });
 
 describe("delete questionnaire", () => {
+  // Deleting a questionnaire removes approved answers too: admin only.
+  beforeEach(() => {
+    session.user.role = "ADMIN";
+  });
+
   it("removes export records and the questionnaire in one transaction and audits the counts", async () => {
     db.questionnaire.findUnique.mockResolvedValue({
       id: "qn-1",

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 
@@ -35,4 +36,4 @@ export const DELETE = apiHandler(async ({ params, organizationId }) => {
   ]);
 
   return NextResponse.json({ success: true });
-});
+}, { roles: rolesFor("knowledge") });

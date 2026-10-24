@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 
 // POST /api/interview/[id]/complete - Finalize interview
@@ -33,4 +34,4 @@ export const POST = apiHandler(async ({ req, params, user, organizationId }) => 
     questionsAsked: session.questionsAsked,
     domainsCompleted: session.domainsCompleted,
   });
-});
+}, { roles: rolesFor("knowledge") });

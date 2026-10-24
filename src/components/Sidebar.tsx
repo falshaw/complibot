@@ -46,7 +46,7 @@ const MAIN: NavItem[] = [
   },
   {
     href: "/knowledge",
-    label: "Knowledge Base",
+    label: "Knowledge base",
     icon: BookOpen,
     match: isKnowledgePage,
   },
@@ -67,19 +67,19 @@ const MAIN: NavItem[] = [
 const TOOLS: NavItem[] = [
   {
     href: "/knowledge/interview",
-    label: "AI Interview",
+    label: "AI interview",
     icon: MessageSquare,
     match: under("/knowledge/interview"),
   },
   {
     href: "/knowledge/gap-analysis",
-    label: "Gap Analysis",
+    label: "Gap analysis",
     icon: BarChart3,
     match: under("/knowledge/gap-analysis"),
   },
   {
     href: "/audit",
-    label: "Audit Trail",
+    label: "Audit trail",
     icon: ScrollText,
     match: under("/audit"),
   },
