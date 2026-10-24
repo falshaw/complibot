@@ -5,6 +5,7 @@ import { apiHandler } from "@/lib/apiHandler";
 import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { RATE_LIMITS } from "@/lib/rateLimit";
+import { withModelBatch } from "@/lib/ollama";
 import { ingestQuestionnaireAsKB } from "@/lib/services/QuestionnaireParserService";
 import * as fs from "fs";
 import * as path from "path";
@@ -126,11 +127,8 @@ export const POST = apiHandler(
           { status: 400 },
         );
       }
-      ingestQuestionnaireAsKB(
-        source.id,
-        filePath,
-        mapping,
-        organizationId,
+      withModelBatch(() =>
+        ingestQuestionnaireAsKB(source.id, filePath, mapping, organizationId),
       ).catch(async (err) => {
         await prisma.knowledgeSource.update({
           where: { id: source.id },

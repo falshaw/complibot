@@ -6,6 +6,7 @@ import prisma from "@/lib/prisma";
 import { generateQuestionnaireAnswers } from "@/lib/services/AnswerGenerationService";
 import { canStartGeneration } from "@/lib/services/generationGate";
 import { RATE_LIMITS } from "@/lib/rateLimit";
+import { withModelBatch } from "@/lib/ollama";
 
 // POST /api/questionnaires/[id]/generate - Trigger AI answer generation
 export const POST = apiHandler(
@@ -40,9 +41,8 @@ export const POST = apiHandler(
       );
     }
 
-    const result = await generateQuestionnaireAnswers(
-      questionnaire.id,
-      organizationId,
+    const result = await withModelBatch(() =>
+      generateQuestionnaireAnswers(questionnaire.id, organizationId),
     );
 
     await audit({
