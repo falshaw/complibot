@@ -1,5 +1,5 @@
 /**
- * CompliBot - AI Security Questionnaire Responder
+ * CompliBot
  * Copyright (c) 2024-2026 Nick Falshaw
  */
 

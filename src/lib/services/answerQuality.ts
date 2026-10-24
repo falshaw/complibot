@@ -130,6 +130,19 @@ export function isHedged(answer: string): boolean {
   return HEDGES.some((re) => re.test(answer));
 }
 
+/**
+ * An unedited draft that cites nothing and says the knowledge base does not
+ * cover the question. Approving it would send "not covered" to the customer,
+ * so a person has to write the answer first.
+ */
+export function needsEditBeforeApproval(answer: {
+  content: string;
+  editedContent: string | null;
+  sourceCount: number;
+}): boolean {
+  return !answer.editedContent && answer.sourceCount === 0 && isHedged(answer.content);
+}
+
 export function qualitySignals(
   question: string,
   answer: string,

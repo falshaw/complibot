@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { BookOpen, Plus, Search, Upload } from "lucide-react";
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { SECURITY_DOMAINS, domainLabel } from "@/lib/ui/labels";
+import { can } from "@/lib/permissions";
 
 interface KnowledgeEntry {
   id: string;
@@ -36,6 +38,7 @@ const SOURCE_TONE: Record<string, string> = {
 };
 
 export default function KnowledgePage() {
+  const canEdit = can(useSession().data?.user?.role, "knowledge");
   // ?search= from the dashboard search box
   const initial = useSearchParams().get("search") ?? "";
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
@@ -91,17 +94,19 @@ export default function KnowledgePage() {
     <>
       <PageHeader
         eyebrow="Knowledge base"
-        title="Knowledge Base"
+        title="Knowledge base"
         sub="Question and answer pairs the AI cites when it drafts answers."
         actions={
-          <>
-            <Link href="/knowledge/new" className="btn btn-primary btn-sm">
-              <Plus className="h-3.5 w-3.5" aria-hidden /> New entry
-            </Link>
-            <Link href="/knowledge/upload" className="btn btn-ghost btn-sm">
-              <Upload className="h-3.5 w-3.5" aria-hidden /> Upload source
-            </Link>
-          </>
+          canEdit && (
+            <>
+              <Link href="/knowledge/new" className="btn btn-primary btn-sm">
+                <Plus className="h-3.5 w-3.5" aria-hidden /> New entry
+              </Link>
+              <Link href="/knowledge/upload" className="btn btn-ghost btn-sm">
+                <Upload className="h-3.5 w-3.5" aria-hidden /> Upload source
+              </Link>
+            </>
+          )
         }
       />
 
@@ -150,12 +155,16 @@ export default function KnowledgePage() {
               : "Add an entry by hand, upload past questionnaires with their answers, or run the AI interview."
           }
         >
-          <Link href="/knowledge/new" className="btn btn-primary btn-sm">
-            New entry
-          </Link>
-          <Link href="/knowledge/interview" className="btn btn-ghost btn-sm">
-            AI interview
-          </Link>
+          {canEdit && (
+            <>
+              <Link href="/knowledge/new" className="btn btn-primary btn-sm">
+                New entry
+              </Link>
+              <Link href="/knowledge/interview" className="btn btn-ghost btn-sm">
+                AI interview
+              </Link>
+            </>
+          )}
         </EmptyState>
       ) : (
         <ul className="card divide-y divide-line-2 overflow-hidden">
@@ -203,7 +212,7 @@ export default function KnowledgePage() {
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                 <span className="min-w-0 truncate font-mono">{s.name}</span>
                 <span className="flex items-center gap-3 text-ink-65">
-                  {s.status === "completed" && <span>{s.entriesCreated} entries</span>}
+                  {s.status === "completed" && <span>{s.entriesCreated} {s.entriesCreated === 1 ? "entry" : "entries"}</span>}
                   {s.status === "failed" && s.errorMessage && (
                     <span className="max-w-[260px] truncate text-red" title={s.errorMessage}>
                       {s.errorMessage}

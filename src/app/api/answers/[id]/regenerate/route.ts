@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { generateAnswer } from "@/lib/services/AnswerGenerationService";
 import { RATE_LIMITS } from "@/lib/rateLimit";
@@ -73,5 +74,5 @@ export const POST = apiHandler(
 
     return NextResponse.json(answer);
   },
-  { rateLimit: RATE_LIMITS.ai },
+  { roles: rolesFor("draft"), rateLimit: RATE_LIMITS.ai },
 );

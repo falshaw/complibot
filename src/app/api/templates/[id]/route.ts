@@ -12,11 +12,11 @@
 
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 import prisma from "@/lib/prisma";
 import { templateStats, updateTemplateSchema } from "@/lib/validators/template";
 
-const WRITERS = ["ADMIN", "RESPONDER"] as const;
 
 const builtInOrMissing = () =>
   NextResponse.json(
@@ -80,7 +80,7 @@ export const PATCH = apiHandler(
 
     return NextResponse.json({ success: true, template });
   },
-  { schema: updateTemplateSchema, roles: [...WRITERS] },
+  { schema: updateTemplateSchema, roles: rolesFor("draft") },
 );
 
 export const DELETE = apiHandler(
@@ -102,7 +102,7 @@ export const DELETE = apiHandler(
 
     return NextResponse.json({ success: true });
   },
-  { roles: [...WRITERS] },
+  { roles: rolesFor("draft") },
 );
 
 export const POST = apiHandler(
@@ -144,5 +144,5 @@ export const POST = apiHandler(
 
     return NextResponse.json({ success: true, template: clone }, { status: 201 });
   },
-  { roles: [...WRITERS] },
+  { roles: rolesFor("draft") },
 );

@@ -1,151 +1,27 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
-import { exportToExcel } from "@/lib/services/ExportService";
-import prisma from "@/lib/prisma";
-import * as fs from "fs";
+import { rolesFor } from "@/lib/permissions";
+import { ExportError, exportQuestionnaire, type ExportFormat } from "@/lib/services/ExportService";
 
-// POST /api/questionnaires/[id]/export?format=xlsx|pdf|txt - Export questionnaire
+const FORMATS: ExportFormat[] = ["xlsx", "txt", "filled"];
+
+// POST /api/questionnaires/[id]/export?format=xlsx|txt|filled - Export questionnaire
 export const POST = apiHandler(async ({ params, user, organizationId, req }) => {
-  const format = new URL(req.url).searchParams.get("format") || "xlsx";
-
-  if (format === "xlsx") {
-    const { filePath, fileName } = await exportToExcel(
-      params.id,
-      organizationId,
-    );
-    const fileBuffer = fs.readFileSync(filePath);
-    await audit({
-      organizationId,
-      userId: user.id,
-      action: "questionnaire.export",
-      entityType: "Questionnaire",
-      entityId: params.id,
-      details: { format: "xlsx", fileName },
-      req,
-    });
-
-    return new NextResponse(fileBuffer, {
-      headers: {
-        "Content-Type":
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${fileName}"`,
-      },
-    });
+  const format = (new URL(req.url).searchParams.get("format") || "xlsx") as ExportFormat;
+  if (!FORMATS.includes(format)) {
+    return NextResponse.json({ error: `Unknown format. Use one of: ${FORMATS.join(", ")}` }, { status: 400 });
   }
 
-  // PDF-style text report or plain text (CB-05)
-  const questionnaire = await prisma.questionnaire.findUniqueOrThrow({
-    where: { id: params.id, organizationId },
-    include: {
-      questions: {
-        orderBy: { rowIndex: "asc" },
-        include: {
-          answers: {
-            orderBy: { updatedAt: "desc" },
-            take: 1,
-            include: {
-              sources: {
-                include: {
-                  knowledgeEntry: {
-                    select: { question: true, domain: true },
-                  },
-                },
-                orderBy: { rank: "asc" },
-              },
-            },
-          },
-        },
-      },
-      organization: { select: { name: true } },
-    },
-  });
-
-  const date = new Date().toISOString().split("T")[0];
-  const answered = questionnaire.questions.filter(
-    (q) => q.answers.length > 0,
-  ).length;
-  const approved = questionnaire.questions.filter(
-    (q) => q.answers[0]?.status === "APPROVED",
-  ).length;
-
-  const sections: string[] = [];
-  sections.push("SECURITY QUESTIONNAIRE REPORT");
-  sections.push("=".repeat(60));
-  sections.push("");
-  sections.push(`Organization:  ${questionnaire.organization.name}`);
-  sections.push(`Questionnaire: ${questionnaire.name}`);
-  sections.push(`Report Date:   ${date}`);
-  sections.push(`Total Questions: ${questionnaire.questions.length}`);
-  sections.push(`Answered:        ${answered}`);
-  sections.push(`Approved:        ${approved}`);
-  sections.push("");
-
-  // Domain breakdown
-  const domainCounts = new Map<string, { total: number; answered: number }>();
-  for (const q of questionnaire.questions) {
-    const d = q.domain.replace(/_/g, " ");
-    const entry = domainCounts.get(d) || { total: 0, answered: 0 };
-    entry.total++;
-    if (q.answers.length > 0) entry.answered++;
-    domainCounts.set(d, entry);
-  }
-  sections.push("DOMAIN COVERAGE");
-  sections.push("-".repeat(60));
-  for (const [domain, counts] of domainCounts) {
-    sections.push(`  ${domain.padEnd(30)} ${counts.answered}/${counts.total}`);
-  }
-  sections.push("");
-
-  // Questions & Answers
-  sections.push("QUESTIONS & ANSWERS");
-  sections.push("-".repeat(60));
-  for (const q of questionnaire.questions) {
-    const answer = q.answers[0];
-    const answerText =
-      answer?.editedContent || answer?.content || "(No answer)";
-    const confidence = answer
-      ? `${Math.round(answer.confidence * 100)}%`
-      : "N/A";
-    const status = answer?.status || "UNANSWERED";
-
-    sections.push("");
-    sections.push(`Q${q.rowIndex}. ${q.questionText}`);
-    sections.push(
-      `    Domain: ${q.domain.replace(/_/g, " ")} | Status: ${status} | Confidence: ${confidence}`,
-    );
-    sections.push("");
-    // Wrap answer text at ~78 chars with indent
-    const words = answerText.split(" ");
-    let line = "    ";
-    for (const word of words) {
-      if (line.length + word.length > 78) {
-        sections.push(line);
-        line = "    " + word;
-      } else {
-        line += (line.trim() ? " " : "") + word;
-      }
+  let file;
+  try {
+    file = await exportQuestionnaire(params.id, organizationId, format);
+  } catch (error) {
+    if (error instanceof ExportError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
     }
-    if (line.trim()) sections.push(line);
-
-    if (answer?.sources?.length) {
-      sections.push("");
-      sections.push("    Sources:");
-      for (const src of answer.sources) {
-        sections.push(
-          `      - [${src.knowledgeEntry.domain}] ${src.knowledgeEntry.question.slice(0, 70)}`,
-        );
-      }
-    }
+    throw error;
   }
-
-  sections.push("");
-  sections.push("=".repeat(60));
-  sections.push("Generated by CompliBot — AI Security Questionnaire Responder");
-
-  const content = sections.join("\n");
-  const safeName = questionnaire.name.replace(/[^a-zA-Z0-9]/g, "_");
-  const filename = `${safeName}_report_${date}.txt`;
 
   await audit({
     organizationId,
@@ -153,15 +29,14 @@ export const POST = apiHandler(async ({ params, user, organizationId, req }) => 
     action: "questionnaire.export",
     entityType: "Questionnaire",
     entityId: params.id,
-    details: { format, fileName: filename },
+    details: { format, fileName: file.fileName },
     req,
   });
 
-  return new NextResponse(content, {
-    status: 200,
+  return new NextResponse(new Uint8Array(file.body), {
     headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Type": file.contentType,
+      "Content-Disposition": `attachment; filename="${file.fileName}"`,
     },
   });
-});
+}, { roles: rolesFor("draft") });

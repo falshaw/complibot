@@ -4,12 +4,12 @@
  */
 
 import prisma from "@/lib/prisma";
-import { embedKnowledgeEntry } from "./EmbeddingService";
+import { refreshEntryEmbedding } from "./EmbeddingService";
 import { logger } from "@/lib/logger";
 import { ollamaChatWithBreaker, OLLAMA_MODEL } from "@/lib/ollama";
 import type { SecurityDomain } from "@prisma/client";
 
-const DOMAIN_ORDER: SecurityDomain[] = [
+export const DOMAIN_ORDER: SecurityDomain[] = [
   "ACCESS_CONTROL",
   "AUTHENTICATION",
   "ENCRYPTION",
@@ -32,7 +32,7 @@ const DOMAIN_ORDER: SecurityDomain[] = [
   "GENERAL",
 ];
 
-const DOMAIN_QUESTIONS: Record<string, string[]> = {
+export const DOMAIN_QUESTIONS: Record<string, string[]> = {
   ACCESS_CONTROL: [
     "How do you manage user access to systems and applications?",
     "Describe your process for granting, reviewing, and revoking access rights.",
@@ -134,6 +134,44 @@ const DOMAIN_QUESTIONS: Record<string, string[]> = {
 };
 
 /**
+ * One conversation line. A question the user already answered in an earlier
+ * reply is logged with skipped: true, so it is never asked, never shown and
+ * still counts as done for its domain.
+ */
+type LogEntry = {
+  role: string;
+  content: string;
+  domain: string;
+  timestamp: string;
+  skipped?: boolean;
+};
+
+/** What the interview page shows, built from a session row. */
+export function interviewState(session: {
+  id: string;
+  status: string;
+  currentDomain: SecurityDomain;
+  entriesCreated: number;
+  conversationLog: unknown;
+}) {
+  const log = ((session.conversationLog as LogEntry[]) || []).filter((m) => !m.skipped);
+  const questions = DOMAIN_QUESTIONS[session.currentDomain] || [];
+  const current = [...log].reverse().find((m) => m.role === "assistant" && m.domain === session.currentDomain);
+  const currentQuestion = current?.content ?? questions[0] ?? "";
+  return {
+    id: session.id,
+    status: session.status,
+    currentDomain: session.currentDomain,
+    currentQuestion,
+    domainIndex: DOMAIN_ORDER.indexOf(session.currentDomain),
+    questionIndex: Math.max(0, questions.indexOf(currentQuestion)),
+    totalDomains: DOMAIN_ORDER.length,
+    entriesCreated: session.entriesCreated,
+    messages: log.map((m) => ({ role: m.role, content: m.content, domain: m.domain })),
+  };
+}
+
+/**
  * Start a new interview session
  */
 export async function startInterview(
@@ -196,18 +234,20 @@ export async function processResponse(
     throw new Error("Interview session is not active");
   }
 
-  const conversationLog =
-    (session.conversationLog as Array<{
-      role: string;
-      content: string;
-      domain: string;
-      timestamp: string;
-    }>) || [];
+  const conversationLog = (session.conversationLog as unknown as LogEntry[]) || [];
 
   // Get the last question asked
   const lastQuestion = conversationLog
-    .filter((m) => m.role === "assistant")
+    .filter((m) => m.role === "assistant" && !m.skipped)
     .pop();
+
+  // This domain's questions not asked yet: one reply often answers them too
+  const currentDomainQuestions = DOMAIN_QUESTIONS[session.currentDomain] || [];
+  const askedBefore = conversationLog.filter(
+    (m) => m.role === "assistant" && m.domain === session.currentDomain,
+  ).length;
+  const upcoming = currentDomainQuestions.slice(askedBefore);
+  const alsoAnswered = new Set<number>();
 
   // Create KB entry from the Q&A pair
   let entriesCreated = 0;
@@ -222,11 +262,16 @@ export async function processResponse(
       messages: [
         {
           role: "system",
-          content: `Extract a clean knowledge base entry from this interview exchange. Return JSON with "question" and "answer" fields. The question should be a generic security questionnaire question, and the answer should be a professional response based on what the user said.`,
+          content: `Extract a clean knowledge base entry from this interview exchange. Return JSON with "question" and "answer" fields. The question should be a generic security questionnaire question, and the answer should be a professional response based on what the user said, adding nothing they did not say.
+If upcoming questions are listed, also return "alsoAnswered": the numbers of the upcoming questions the user's reply already answers in full (an empty list when none).`,
         },
         {
           role: "user",
-          content: `Interviewer asked: "${lastQuestion.content}"\nUser responded: "${userResponse}"`,
+          content:
+            `Interviewer asked: "${lastQuestion.content}"\nUser responded: "${userResponse}"` +
+            (upcoming.length
+              ? `\n\nUpcoming questions:\n${upcoming.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
+              : ""),
         },
       ],
       temperature: 0.2,
@@ -248,15 +293,14 @@ export async function processResponse(
           },
         });
 
-        // Generate embedding in background (optional; keyword search works without it)
-        embedKnowledgeEntry(
-          entry.id,
-          extracted.question,
-          extracted.answer,
-        ).catch(() => {
-          /* logged and paused inside embedKnowledgeEntry */
-        });
+        await refreshEntryEmbedding(entry.id, entry.question, entry.answer);
         entriesCreated = 1;
+      }
+      if (Array.isArray(extracted.alsoAnswered)) {
+        for (const n of extracted.alsoAnswered) {
+          const i = Number(n) - 1;
+          if (Number.isInteger(i) && i >= 0 && i < upcoming.length) alsoAnswered.add(i);
+        }
       }
     } catch {
       logger.warn("Failed to extract KB entry from interview response");
@@ -271,20 +315,25 @@ export async function processResponse(
     timestamp: new Date().toISOString(),
   });
 
-  // Determine next question
-  const currentDomainQuestions = DOMAIN_QUESTIONS[session.currentDomain] || [];
-  const askedInDomain = conversationLog.filter(
-    (m) => m.role === "assistant" && m.domain === session.currentDomain,
-  ).length;
-
+  // Next question: the first upcoming one the reply did not already answer
   let nextQuestion: string | null = null;
   let nextDomain = session.currentDomain;
   const domainsCompleted = [...(session.domainsCompleted || [])];
 
-  if (askedInDomain < currentDomainQuestions.length) {
-    // More questions in this domain
-    nextQuestion = currentDomainQuestions[askedInDomain];
-  } else {
+  for (let i = 0; i < upcoming.length && !nextQuestion; i++) {
+    if (!alsoAnswered.has(i)) nextQuestion = upcoming[i];
+    else {
+      conversationLog.push({
+        role: "assistant",
+        content: upcoming[i],
+        domain: session.currentDomain,
+        timestamp: new Date().toISOString(),
+        skipped: true,
+      });
+    }
+  }
+
+  if (!nextQuestion) {
     // Move to next domain
     domainsCompleted.push(session.currentDomain);
     const currentIndex = DOMAIN_ORDER.indexOf(session.currentDomain);

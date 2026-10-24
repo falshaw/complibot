@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { plural } from "@/lib/ui/labels";
 
 const COL = /^[A-Z]{1,2}$/;
 
@@ -15,8 +16,32 @@ export default function KnowledgeUploadPage() {
   const [questionCol, setQuestionCol] = useState("A");
   const [answerCol, setAnswerCol] = useState("B");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
 
   const colsOk = COL.test(questionCol) && COL.test(answerCol);
+
+  // Rows are imported in the background (each one is classified by the
+  // local model), so follow the source until it is done.
+  async function waitForImport(sourceId: string) {
+    setProgress("Importing…");
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2500));
+      const res = await fetch(`/api/sources/${sourceId}`).catch(() => null);
+      if (!res?.ok) break;
+      const s = await res.json();
+      const n: number = s.entriesCreated || s._count?.knowledgeEntries || 0;
+      if (s.status === "completed") {
+        toast.success(`${plural(n, "entry", "entries")} imported from ${s.name}`);
+        return;
+      }
+      if (s.status === "failed") {
+        toast.error(s.errorMessage ? `Import failed: ${s.errorMessage}` : "Import failed");
+        return;
+      }
+      setProgress(`Importing… ${plural(n, "entry", "entries")} so far`);
+    }
+    toast.success("Source uploaded. Entries are being imported.");
+  }
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
@@ -32,7 +57,7 @@ export default function KnowledgeUploadPage() {
       const res = await fetch("/api/sources", { method: "POST", body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Upload failed");
-      toast.success("Source uploaded. Entries are being imported.");
+      await waitForImport(data.id);
       router.push("/knowledge");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
@@ -87,8 +112,13 @@ export default function KnowledgeUploadPage() {
 
         <button type="submit" className="btn btn-primary" disabled={!file || !colsOk || loading}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Upload className="h-4 w-4" aria-hidden />}
-          Upload and import
+          {progress ?? "Upload and import"}
         </button>
+        {progress && (
+          <p className="text-xs text-ink-65" role="status">
+            Each row is classified by the local model, so this takes a few seconds per row.
+          </p>
+        )}
       </form>
     </div>
   );

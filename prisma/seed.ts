@@ -95,10 +95,10 @@ async function main() {
   const templates = [
     {
       id: "tpl-sig-lite",
-      name: "SIG Lite",
+      name: "SIG Lite sample",
       framework: "SIG Lite",
       description:
-        "Shared Assessments Standardized Information Gathering (SIG) Lite questionnaire — 200 key controls for third-party risk assessment.",
+        "18 sample questions on third-party risk, modelled on the topics of the Shared Assessments SIG Lite. Not the licensed SIG content.",
       questionCount: 18,
       domains: [
         "ACCESS_CONTROL",
@@ -223,10 +223,10 @@ async function main() {
     },
     {
       id: "tpl-caiq",
-      name: "CAIQ v4",
+      name: "CAIQ v4 sample",
       framework: "CAIQ",
       description:
-        "Cloud Security Alliance Consensus Assessments Initiative Questionnaire — cloud-specific security controls aligned with CCM v4.",
+        "15 sample questions on cloud security, modelled on the topics of the CSA CAIQ. Not the official questionnaire.",
       questionCount: 15,
       domains: [
         "CLOUD_SECURITY",
@@ -331,10 +331,10 @@ async function main() {
     },
     {
       id: "tpl-vsa",
-      name: "VSA Questionnaire",
+      name: "VSA sample",
       framework: "VSA",
       description:
-        "Vendor Security Alliance questionnaire — standardized vendor security assessment used by major tech companies.",
+        "12 sample vendor-security questions, modelled on the topics of the Vendor Security Alliance questionnaire.",
       questionCount: 12,
       domains: [
         "GOVERNANCE",
@@ -420,10 +420,10 @@ async function main() {
     },
     {
       id: "tpl-nist-csf",
-      name: "NIST CSF Assessment",
+      name: "NIST CSF sample",
       framework: "NIST CSF",
       description:
-        "NIST Cybersecurity Framework assessment — Identify, Protect, Detect, Respond, Recover functions.",
+        "15 sample questions across the NIST CSF functions: Identify, Protect, Detect, Respond and Recover.",
       questionCount: 15,
       domains: [
         "GOVERNANCE",
@@ -528,10 +528,10 @@ async function main() {
     },
     {
       id: "tpl-iso27001",
-      name: "ISO 27001 Controls",
+      name: "ISO 27001 sample",
       framework: "ISO 27001",
       description:
-        "ISO/IEC 27001:2022 Annex A controls assessment — information security management system controls across 4 themes.",
+        "16 sample questions on security controls, modelled on ISO/IEC 27001:2022 Annex A topics. Not the text of the standard.",
       questionCount: 16,
       domains: [
         "GOVERNANCE",
@@ -645,10 +645,10 @@ async function main() {
     },
     {
       id: "tpl-cis-controls",
-      name: "CIS Controls v8",
+      name: "CIS Controls v8 sample",
       framework: "CIS Controls",
       description:
-        "Center for Internet Security Controls v8 — prioritized security actions organized into 18 control families.",
+        "18 sample questions modelled on the CIS Controls v8.",
       questionCount: 18,
       domains: [
         "GOVERNANCE",
@@ -774,10 +774,10 @@ async function main() {
     },
     {
       id: "tpl-soc2",
-      name: "SOC 2 Type II Readiness",
+      name: "SOC 2 readiness sample",
       framework: "SOC 2",
       description:
-        "SOC 2 Trust Services Criteria readiness assessment — Security, Availability, Processing Integrity, Confidentiality, Privacy.",
+        "15 sample readiness questions across the SOC 2 Trust Services Criteria.",
       questionCount: 15,
       domains: [
         "GOVERNANCE",
@@ -888,6 +888,8 @@ async function main() {
     await prisma.questionnaireTemplate.upsert({
       where: { id: tpl.id },
       update: {
+        name: tpl.name,
+        description: tpl.description,
         questions: tpl.questions as object[],
         questionCount: tpl.questionCount,
       },

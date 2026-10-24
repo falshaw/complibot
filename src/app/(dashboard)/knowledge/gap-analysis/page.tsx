@@ -2,14 +2,17 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { can } from "@/lib/permissions";
+import { plural } from "@/lib/ui/labels";
 
 interface DomainAnalysis {
   domain: string;
   label: string;
   entries: number;
   verified: number;
-  confidence: number;
+  confidence: number | null; // avg confidence of drafted answers, null = no drafts yet
   questionsAsked: number;
   coverage: "strong" | "adequate" | "weak" | "none";
   gapScore: number;
@@ -24,6 +27,8 @@ interface GapData {
   recommendations: string[];
 }
 
+const conf = (c: number | null) => (c === null ? "no drafts" : `${c}%`);
+
 const COVERAGE: Record<DomainAnalysis["coverage"], { badge: string; bar: string }> = {
   strong: { badge: "b-teal", bar: "var(--teal)" },
   adequate: { badge: "b-blue", bar: "var(--accent)" },
@@ -32,6 +37,7 @@ const COVERAGE: Record<DomainAnalysis["coverage"], { badge: string; bar: string 
 };
 
 export default function GapAnalysisPage() {
+  const canEdit = can(useSession().data?.user?.role, "knowledge");
   const [data, setData] = useState<GapData | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -60,9 +66,11 @@ export default function GapAnalysisPage() {
         title="Gap analysis"
         sub="Where the knowledge base is thin, so drafted answers there will have low confidence."
         actions={
-          <Link href="/knowledge/interview" className="btn btn-primary btn-sm">
-            Fill gaps with the AI interview
-          </Link>
+          canEdit && (
+            <Link href="/knowledge/interview" className="btn btn-primary btn-sm">
+              Fill gaps with the AI interview
+            </Link>
+          )
         }
       />
 
@@ -91,7 +99,7 @@ export default function GapAnalysisPage() {
       <section className="card mb-4 p-[18px]">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="!text-base">Coverage by domain</h2>
-          <span className="text-xs text-ink-65">entries · avg confidence</span>
+          <span className="text-xs text-ink-65">entries · confidence of drafted answers</span>
         </div>
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
           {data.domains.map((d) => {
@@ -100,7 +108,7 @@ export default function GapAnalysisPage() {
               <div
                 key={d.domain}
                 className="rounded-2xl border border-g-line bg-g-bg p-3"
-                title={`${d.label}: ${d.entries} entries, ${d.verified} verified, ${d.confidence}% avg confidence, ${d.questionsAsked} questions asked`}
+                title={`${d.label}: ${plural(d.entries, "entry", "entries")}, ${d.verified} verified, drafts ${conf(d.confidence)}, ${plural(d.questionsAsked, "question")} asked`}
               >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="truncate text-[13px] font-semibold">{d.label}</span>
@@ -110,8 +118,8 @@ export default function GapAnalysisPage() {
                   <span style={{ width: `${Math.min(100, (d.entries / maxEntries) * 100)}%`, background: c.bar }} />
                 </span>
                 <div className="mt-1.5 flex justify-between text-xs text-ink-65">
-                  <span>{d.entries} entries</span>
-                  <span className="font-mono">{d.confidence}%</span>
+                  <span>{plural(d.entries, "entry", "entries")}</span>
+                  <span className="font-mono">{conf(d.confidence)}</span>
                 </div>
               </div>
             );
@@ -139,7 +147,7 @@ export default function GapAnalysisPage() {
                   <td className="!pl-0 font-semibold">{g.label}</td>
                   <td className="font-mono">{g.entries}</td>
                   <td className="hidden font-mono sm:table-cell">{g.verified}</td>
-                  <td className="hidden font-mono sm:table-cell">{g.confidence}%</td>
+                  <td className="hidden font-mono sm:table-cell">{conf(g.confidence)}</td>
                   <td className="hidden font-mono md:table-cell">{g.questionsAsked}</td>
                   <td>
                     <span className={`badge ${g.gapScore >= 70 ? "b-red" : g.gapScore >= 50 ? "b-amber" : "b-blue"}`}>

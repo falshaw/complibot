@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 import prisma from "@/lib/prisma";
 import { createTemplateSchema, templateStats } from "@/lib/validators/template";
@@ -59,5 +60,5 @@ export const POST = apiHandler(
 
     return NextResponse.json({ success: true, template }, { status: 201 });
   },
-  { schema: createTemplateSchema, roles: ["ADMIN", "RESPONDER"] },
+  { roles: rolesFor("draft"), schema: createTemplateSchema },
 );

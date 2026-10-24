@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { refreshQuestionnaireCounts } from "@/lib/services/questionnaireCounts";
@@ -45,5 +46,5 @@ export const POST = apiHandler(
 
     return NextResponse.json(answer);
   },
-  { schema: rejectSchema },
+  { roles: rolesFor("review"), schema: rejectSchema },
 );

@@ -9,7 +9,10 @@ import { toast } from "sonner";
 import { CitedEntry, type CitedSource } from "@/components/CitedEntry";
 import { DeleteQuestionnaireButton } from "@/components/DeleteQuestionnaireButton";
 import { EmptyState, LoadingBlocks } from "@/components/ui/PageHeader";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { answerStatus, domainLabel, typeLabel } from "@/lib/ui/labels";
+import { can } from "@/lib/permissions";
+import { needsEditBeforeApproval } from "@/lib/services/answerQuality";
 
 interface Answer {
   id: string;
@@ -71,7 +74,9 @@ export default function QuestionnaireReviewPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const role = useSession().data?.user?.role;
-  const canDelete = role === "ADMIN" || role === "RESPONDER";
+  const canDraft = can(role, "draft");
+  const canReview = can(role, "review");
+  const canDelete = can(role, "admin");
   const [q, setQ] = useState<Questionnaire | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [threshold, setThreshold] = useState(0.8);
@@ -79,6 +84,7 @@ export default function QuestionnaireReviewPage() {
   const [editMode, setEditMode] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmBulk, setConfirmBulk] = useState(false);
   const initialPick = useRef(false);
 
   const fetchData = useCallback(async () => {
@@ -163,15 +169,16 @@ export default function QuestionnaireReviewPage() {
     if (done) go(1);
   }
 
-  function reject() {
+  async function reject() {
     if (!answer) return;
-    return act(
+    const done = await act(
       "reject",
       `/api/answers/${answer.id}/reject`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
       "Answer rejected",
       "Could not reject the answer",
     );
+    if (done) go(1);
   }
 
   function regenerate() {
@@ -179,7 +186,7 @@ export default function QuestionnaireReviewPage() {
     return act("regenerate", `/api/answers/${answer.id}/regenerate`, { method: "POST" }, "New draft generated", "Could not regenerate the answer");
   }
 
-  async function saveEdit() {
+  async function saveEdit(andApprove = false) {
     if (!answer || !editContent.trim()) return;
     const done = await act(
       "edit",
@@ -189,10 +196,12 @@ export default function QuestionnaireReviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ editedContent: editContent }),
       },
-      "Edit saved",
+      andApprove ? "Edit saved" : "Edit saved. It needs approval again.",
       "Could not save the edit",
     );
-    if (done) setEditMode(false);
+    if (!done) return;
+    setEditMode(false);
+    if (andApprove) await approve();
   }
 
   async function parse() {
@@ -237,17 +246,28 @@ export default function QuestionnaireReviewPage() {
       .filter((a): a is Answer => !!a && a.status === "PENDING")
       .map((a) => a.id);
     if (ids.length === 0) return;
-    await act(
-      "bulk",
-      "/api/answers/bulk-approve",
-      {
+    setBusy("bulk");
+    try {
+      const res = await fetch("/api/answers/bulk-approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answerIds: ids }),
-      },
-      `Approved ${ids.length} pending ${ids.length === 1 ? "answer" : "answers"}`,
-      "Bulk approve failed",
-    );
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) toast.error(data.error || "Bulk approve failed");
+      else {
+        const n = data.approved ?? 0;
+        toast.success(
+          `Approved ${n} ${n === 1 ? "answer" : "answers"}` +
+            (data.skipped ? `. ${data.skipped} "not covered" left open: write those answers first.` : ""),
+        );
+      }
+    } catch {
+      toast.error("Bulk approve failed");
+    }
+    setConfirmBulk(false);
+    await fetchData();
+    setBusy(null);
   }
 
   // Keyboard shortcuts (not while typing)
@@ -259,9 +279,15 @@ export default function QuestionnaireReviewPage() {
       if (e.key === "ArrowRight" || e.key === "j") go(1);
       else if (e.key === "ArrowLeft" || e.key === "k") go(-1);
       else if (!answer) return;
-      else if (e.key === "a" && answer.status !== "APPROVED") approve();
-      else if (e.key === "r" && answer.status !== "REJECTED") reject();
-      else if (e.key === "e") {
+      else if (
+        e.key === "a" &&
+        canReview &&
+        answer.status !== "APPROVED" &&
+        !needsEditBeforeApproval({ ...answer, sourceCount: answer.sources.length })
+      )
+        approve();
+      else if (e.key === "r" && canReview && answer.status !== "REJECTED") reject();
+      else if (e.key === "e" && canDraft) {
         setEditContent(answer.editedContent || answer.content);
         setEditMode(true);
       }
@@ -290,6 +316,9 @@ export default function QuestionnaireReviewPage() {
   const generating = q.status === "GENERATING" || busy === "generate";
   const shown = answer ? answer.editedContent || answer.content : "";
   const lowConfidence = !!answer && answer.status !== "APPROVED" && answer.confidence < threshold;
+  const notCovered =
+    !!answer &&
+    needsEditBeforeApproval({ ...answer, sourceCount: answer.sources.length });
 
   return (
     <>
@@ -301,27 +330,29 @@ export default function QuestionnaireReviewPage() {
             </Link>{" "}
             / {q.name}
           </div>
-          <h1 className="sm:!text-[28px]">Review answers</h1>
+          <h1 className="sm:!text-[28px]">
+            {q.status === "UPLOADED" ? "Parse questions" : q.status === "PARSED" ? "Generate answers" : "Review answers"}
+          </h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          {q.status === "UPLOADED" && (
+          {canDraft && q.status === "UPLOADED" && (
             <button type="button" className="btn btn-primary btn-sm" onClick={parse} disabled={!!busy}>
               {busy === "parse" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-              Parse questions
+              {busy === "parse" ? "Parsing…" : "Parse questions"}
             </button>
           )}
-          {(q.status === "PARSED" || q.status === "GENERATING") && (
+          {canDraft && (q.status === "PARSED" || q.status === "GENERATING") && (
             <button type="button" className="btn btn-primary btn-sm" onClick={generate} disabled={!!busy || q.status === "GENERATING"}>
               {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
               {generating ? "Generating answers…" : "Generate answers"}
             </button>
           )}
-          {pendingCount > 0 && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={bulkApprove} disabled={!!busy}>
+          {canReview && pendingCount > 0 && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmBulk(true)} disabled={!!busy}>
               Bulk approve ({pendingCount})
             </button>
           )}
-          {q.answeredCount > 0 && (
+          {canDraft && q.answeredCount > 0 && (
             <Link href={`/questionnaires/${id}/export`} className="btn btn-primary btn-sm">
               Export
             </Link>
@@ -347,6 +378,16 @@ export default function QuestionnaireReviewPage() {
           {q.answeredCount > 0 ? <Link href={`/questionnaires/${id}/export`}>5 Export</Link> : "5 Export"}
         </li>
       </ol>
+
+      {busy === "parse" && (
+        <div className="alert alert-warn mb-4" role="status">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+          <span>
+            Reading the questions and classifying each one with the local model. This takes a few
+            seconds per question.
+          </span>
+        </div>
+      )}
 
       {generating && (
         <div className="alert alert-warn mb-4" role="status">
@@ -389,7 +430,7 @@ export default function QuestionnaireReviewPage() {
                       className={`flex w-full items-center justify-between gap-2.5 border-b border-line-2 px-4 py-3 text-left hover:bg-g-bg2 ${i === index ? "!bg-accent-soft" : ""}`}
                     >
                       <span className="min-w-0 truncate font-mono text-[13px]">
-                        #{x.rowIndex} {x.questionText}
+                        #{i + 1} {x.questionText}
                       </span>
                       <span className={`badge ${s.badge}`}>{s.label.toLowerCase()}</span>
                     </button>
@@ -441,9 +482,11 @@ export default function QuestionnaireReviewPage() {
                         <b>
                           Confidence {answer.confidence.toFixed(2)} is below the {threshold.toFixed(2)} threshold.
                         </b>{" "}
-                        {answer.sources.length === 0
-                          ? "No knowledge-base entry matched this question. Check before approving."
-                          : "Check the cited entries before approving."}
+                        {notCovered
+                          ? "The knowledge base does not cover this question. Edit the draft into an answer before approving it."
+                          : answer.sources.length === 0
+                            ? "No knowledge-base entry matched this question. Check before approving."
+                            : "Check the cited entries before approving."}
                       </span>
                     </div>
                   )}
@@ -465,39 +508,65 @@ export default function QuestionnaireReviewPage() {
                           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditMode(false)}>
                             Cancel
                           </button>
-                          <button type="button" className="btn btn-primary btn-sm" onClick={saveEdit} disabled={!!busy || !editContent.trim()}>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${canReview ? "btn-ghost" : "btn-primary"}`}
+                            onClick={() => saveEdit()}
+                            disabled={!!busy || !editContent.trim()}
+                          >
                             Save edit
                           </button>
+                          {canReview && (
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => saveEdit(true)} disabled={!!busy || !editContent.trim()}>
+                              Save and approve
+                            </button>
+                          )}
                         </div>
                       </div>
                     ) : (
-                      <div className="answer-box">{shown}</div>
+                      <div className={`answer-box ${busy === "regenerate" ? "opacity-50" : ""}`} aria-busy={busy === "regenerate"}>
+                        {shown}
+                      </div>
                     )}
                   </div>
 
-                  {!editMode && (
+                  {!editMode && (canDraft || canReview) && (
                     <div className="flex flex-wrap justify-end gap-2">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={!!busy}>
-                        {busy === "regenerate" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-                        Regenerate
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          setEditContent(shown);
-                          setEditMode(true);
-                        }}
-                        disabled={!!busy}
-                      >
-                        Edit
-                      </button>
-                      <button type="button" className="btn btn-danger btn-sm" onClick={reject} disabled={!!busy || answer.status === "REJECTED"}>
-                        Reject
-                      </button>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={approve} disabled={!!busy || answer.status === "APPROVED"}>
-                        Approve
-                      </button>
+                      {canDraft && (
+                        <>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={!!busy}>
+                            {busy === "regenerate" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                            {busy === "regenerate" ? "Regenerating…" : "Regenerate"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              setEditContent(shown);
+                              setEditMode(true);
+                            }}
+                            disabled={!!busy}
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
+                      {canReview && (
+                        <>
+                          <button type="button" className="btn btn-danger btn-sm" onClick={reject} disabled={!!busy || answer.status === "REJECTED"}>
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={approve}
+                            disabled={!!busy || answer.status === "APPROVED" || notCovered}
+                            title={notCovered ? "Edit the draft into an answer first" : undefined}
+                          >
+                            Approve
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -526,7 +595,9 @@ export default function QuestionnaireReviewPage() {
                 </button>
                 <span>
                   {index + 1} of {questions.length}
-                  <span className="hidden sm:inline"> · keys ← → · A approve · R reject · E edit</span>
+                  <span className="hidden sm:inline">
+                    {" "}· keys ← →{canReview && " · A approve · R reject"}{canDraft && " · E edit"}
+                  </span>
                 </span>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(1)} disabled={index >= questions.length - 1} aria-label="Next question">
                   <ChevronRight className="h-4 w-4" aria-hidden />
@@ -536,6 +607,18 @@ export default function QuestionnaireReviewPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmBulk}
+        title={`Approve ${pendingCount} pending ${pendingCount === 1 ? "answer" : "answers"}?`}
+        confirmLabel="Approve all"
+        busy={busy === "bulk"}
+        onConfirm={bulkApprove}
+        onCancel={() => setConfirmBulk(false)}
+      >
+        Every pending draft is approved as it stands, including drafts nobody has opened yet.
+        Drafts that say the knowledge base does not cover the question stay open.
+      </ConfirmDialog>
     </>
   );
 }

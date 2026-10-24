@@ -123,6 +123,27 @@ export async function embedKnowledgeEntry(
 }
 
 /**
+ * Embed a new or changed entry without failing the request: keyword search
+ * still finds the entry when the embedding model is down. A changed entry
+ * loses its old vector first, so it is never ranked by text it no longer has.
+ */
+export async function refreshEntryEmbedding(
+  entryId: string,
+  question: string,
+  answer: string,
+  { changed = false }: { changed?: boolean } = {},
+): Promise<void> {
+  try {
+    if (changed) {
+      await getPool().query(`UPDATE "KnowledgeEntry" SET embedding = NULL WHERE id = $1`, [entryId]);
+    }
+    await embedKnowledgeEntry(entryId, question, answer);
+  } catch {
+    /* logged and paused inside embedKnowledgeEntry */
+  }
+}
+
+/**
  * Semantic search using pgvector cosine similarity
  */
 export async function semanticSearch(

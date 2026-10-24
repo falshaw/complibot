@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { can } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import * as fs from "fs";
@@ -32,7 +33,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const user = session.user as { id: string; organizationId: string };
+    const user = session.user as { id: string; organizationId: string; role: string };
+    if (!can(user.role, "draft")) {
+      return NextResponse.json(
+        { error: "Forbidden", message: "Insufficient permissions" },
+        { status: 403 },
+      );
+    }
     const formData = await req.formData();
     const files = formData.getAll("files") as File[];
 

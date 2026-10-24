@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import * as fs from "fs";
@@ -139,5 +140,5 @@ export const POST = apiHandler(
 
     return NextResponse.json(questionnaire, { status: 201 });
   },
-  { rateLimit: RATE_LIMITS.upload },
+  { roles: rolesFor("draft"), rateLimit: RATE_LIMITS.upload },
 );

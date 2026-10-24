@@ -20,17 +20,17 @@ interface Pagination {
   totalPages: number;
 }
 
-const ENTITY_TYPES = [
-  "Answer",
-  "KnowledgeEntry",
-  "KnowledgeSource",
-  "Questionnaire",
-  "InterviewSession",
-  "Organization",
-  "OrganizationInvitation",
-  "QuestionnaireTemplate",
-  "User",
-];
+const ENTITY_TYPES: Record<string, string> = {
+  Answer: "Answers",
+  KnowledgeEntry: "Knowledge-base entries",
+  KnowledgeSource: "Knowledge sources",
+  Questionnaire: "Questionnaires",
+  InterviewSession: "AI interviews",
+  Organization: "Organization",
+  OrganizationInvitation: "Invitations",
+  QuestionnaireTemplate: "Templates",
+  User: "Team members",
+};
 
 function actionTone(action: string) {
   if (/delete|reject|remove|revoke/.test(action)) return "b-red";
@@ -99,7 +99,7 @@ export default function AuditPage() {
         eyebrow="Tools"
         title="Audit trail"
         sub="Every review decision and change to the knowledge base, questionnaires, settings and team."
-        actions={<span className="pill p-grey">{pg.total} entries</span>}
+        actions={<span className="pill p-grey">{pg.total} {pg.total === 1 ? "entry" : "entries"}</span>}
       />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row">
@@ -117,9 +117,9 @@ export default function AuditPage() {
           }}
         >
           <option value="">All record types</option>
-          {ENTITY_TYPES.map((t) => (
+          {Object.entries(ENTITY_TYPES).map(([t, label]) => (
             <option key={t} value={t}>
-              {t}
+              {label}
             </option>
           ))}
         </select>

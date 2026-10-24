@@ -4,10 +4,10 @@
  */
 
 import prisma from "@/lib/prisma";
-import { SECURITY_DOMAINS } from "@/lib/ui/labels";
+import { COVERAGE_DOMAINS, LEVEL_MIN, coverageScore, domainsWithEntries } from "@/lib/coverage";
 
-/** A domain counts as covered once it has this many KB entries. */
-export const COVERED_MIN_ENTRIES = 3;
+/** Below this many KB entries a domain counts as thin (see coverage.ts). */
+export const COVERED_MIN_ENTRIES = LEVEL_MIN.adequate;
 
 export interface DashboardData {
   organizationName: string;
@@ -38,7 +38,9 @@ export interface DashboardData {
     total: number;
     verified: number;
     addedThisWeek: number;
-    coveredDomains: number;
+    coverageScore: number;
+    domainsWithEntries: number;
+    thinDomains: number;
     totalDomains: number;
     perDomain: { domain: string; count: number }[];
   };
@@ -123,7 +125,7 @@ export async function getDashboardData(
     domainGroups.map((g) => [g.domain, g._count._all]),
   ) as Record<string, number>;
 
-  const perDomain = SECURITY_DOMAINS.map((domain) => ({
+  const perDomain = COVERAGE_DOMAINS.map((domain) => ({
     domain,
     count: counts[domain] ?? 0,
   }));
@@ -165,9 +167,10 @@ export async function getDashboardData(
       total: kbTotal,
       verified: kbVerified,
       addedThisWeek: kbWeek,
-      coveredDomains: perDomain.filter((d) => d.count >= COVERED_MIN_ENTRIES)
-        .length,
-      totalDomains: SECURITY_DOMAINS.length,
+      coverageScore: coverageScore(counts),
+      domainsWithEntries: domainsWithEntries(counts),
+      thinDomains: perDomain.filter((d) => d.count < COVERED_MIN_ENTRIES).length,
+      totalDomains: COVERAGE_DOMAINS.length,
       perDomain,
     },
   };

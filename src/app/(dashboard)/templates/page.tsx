@@ -15,6 +15,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { TemplateEditor, type EditableTemplate } from "@/components/TemplateEditor";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel, typeLabel } from "@/lib/ui/labels";
+import { can } from "@/lib/permissions";
 
 interface TemplateQuestion {
   text: string;
@@ -58,7 +59,7 @@ export default function TemplatesPage() {
   const [deleting, setDeleting] = useState<Template | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const role = useSession().data?.user?.role;
-  const canWrite = role === "ADMIN" || role === "RESPONDER";
+  const canWrite = can(role, "draft");
 
   const load = useCallback(async () => {
     setTemplates(await fetchTemplates());
@@ -212,10 +213,12 @@ export default function TemplatesPage() {
                       {t.questionCount} questions · {t.domains.length} domains · v{t.version}
                     </p>
                     <div className="flex gap-2">
-                      <button type="button" className="btn btn-primary btn-sm flex-1" onClick={() => start(t)} disabled={!!busy}>
-                        {busy === `start-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
-                        Start assessment
-                      </button>
+                      {canWrite && (
+                        <button type="button" className="btn btn-primary btn-sm flex-1" onClick={() => start(t)} disabled={!!busy}>
+                          {busy === `start-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
+                          Start assessment
+                        </button>
+                      )}
                       <button type="button" className="btn btn-ghost btn-sm !px-3" onClick={() => openPreview(t.id)} disabled={!!busy} aria-label={`Preview ${t.name}`} title="Preview questions">
                         {busy === `preview-${t.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
                       </button>
@@ -252,7 +255,7 @@ export default function TemplatesPage() {
           ),
       )}
 
-      {preview && <PreviewModal template={preview} busy={busy} onClose={() => setPreview(null)} onStart={() => start(preview)} />}
+      {preview && <PreviewModal template={preview} busy={busy} onClose={() => setPreview(null)} onStart={canWrite ? () => start(preview) : undefined} />}
 
       {editing && (
         <TemplateEditor
@@ -293,7 +296,7 @@ function PreviewModal({
   template: Template;
   busy: string | null;
   onClose: () => void;
-  onStart: () => void;
+  onStart?: () => void;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -351,10 +354,12 @@ function PreviewModal({
           ))}
         </div>
         <div className="flex gap-2 border-t border-line p-4">
-          <button type="button" className="btn btn-primary flex-1" onClick={onStart} disabled={!!busy}>
-            {busy === `start-${template.id}` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
-            Start assessment ({questions.length} questions)
-          </button>
+          {onStart && (
+            <button type="button" className="btn btn-primary flex-1" onClick={onStart} disabled={!!busy}>
+              {busy === `start-${template.id}` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+              Start assessment ({questions.length} questions)
+            </button>
+          )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Close
           </button>

@@ -95,6 +95,7 @@ vi.mock("@/lib/logger", () => ({
     debug: vi.fn(),
     ai: { generate: vi.fn(), embed: vi.fn() },
     knowledge: { ingest: vi.fn() },
+    api: { request: vi.fn(), error: vi.fn() },
   },
 }));
 

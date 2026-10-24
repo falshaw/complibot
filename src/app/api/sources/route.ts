@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 import { ingestQuestionnaireAsKB } from "@/lib/services/QuestionnaireParserService";
@@ -156,5 +157,5 @@ export const POST = apiHandler(
 
     return NextResponse.json(source, { status: 201 });
   },
-  { rateLimit: RATE_LIMITS.upload },
+  { roles: rolesFor("knowledge"), rateLimit: RATE_LIMITS.upload },
 );

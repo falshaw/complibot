@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import { startInterview } from "@/lib/services/InterviewService";
 
 // POST /api/interview - Start new interview session
@@ -15,4 +16,4 @@ export const POST = apiHandler(async ({ req, user, organizationId }) => {
     req,
   });
   return NextResponse.json(result, { status: 201 });
-});
+}, { roles: rolesFor("knowledge") });

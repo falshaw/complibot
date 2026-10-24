@@ -112,3 +112,8 @@ export const QUESTION_TYPES = [
   "DATE",
   "NUMERIC",
 ] as const;
+
+/** "1 entry" / "3 entries" */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}

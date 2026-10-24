@@ -3,6 +3,7 @@ import path from "path";
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 
 // GET /api/questionnaires/[id] - Get with questions and answers
@@ -102,7 +103,7 @@ export const DELETE = apiHandler(
 
     return NextResponse.json({ message: "Deleted" });
   },
-  { roles: ["ADMIN", "RESPONDER"] },
+  { roles: rolesFor("admin") },
 );
 
 /** Best effort: only files inside the uploads directory are removed. */

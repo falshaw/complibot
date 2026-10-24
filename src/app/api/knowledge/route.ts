@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { createKnowledgeEntrySchema } from "@/lib/validators/knowledge";
 import type { SecurityDomain } from "@prisma/client";
 import { audit } from "@/lib/audit";
+import { refreshEntryEmbedding } from "@/lib/services/EmbeddingService";
 
 // GET /api/knowledge - List knowledge entries with optional domain filter
 export const GET = apiHandler(async ({ req, organizationId }) => {
@@ -54,6 +56,7 @@ export const POST = apiHandler(
         organizationId,
       },
     });
+    await refreshEntryEmbedding(entry.id, entry.question, entry.answer);
     await audit({
       organizationId,
       userId: user.id,
@@ -65,5 +68,5 @@ export const POST = apiHandler(
 
     return NextResponse.json(entry, { status: 201 });
   },
-  { schema: createKnowledgeEntrySchema },
+  { roles: rolesFor("knowledge"), schema: createKnowledgeEntrySchema },
 );

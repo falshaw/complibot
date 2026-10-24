@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { DeleteQuestionnaireButton } from "@/components/DeleteQuestionnaireButton";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { pct, questionnaireStatus } from "@/lib/ui/labels";
+import { can } from "@/lib/permissions";
 
 interface Questionnaire {
   id: string;
@@ -24,7 +25,8 @@ interface Questionnaire {
 export default function QuestionnairesPage() {
   const [items, setItems] = useState<Questionnaire[] | null>(null);
   const role = useSession().data?.user?.role;
-  const canDelete = role === "ADMIN" || role === "RESPONDER";
+  const canDraft = can(role, "draft");
+  const canDelete = can(role, "admin");
 
   useEffect(() => {
     fetch("/api/questionnaires?limit=100")
@@ -41,12 +43,16 @@ export default function QuestionnairesPage() {
         sub="Uploaded files and assessments started from a template."
         actions={
           <>
-            <Link href="/questionnaires/upload" className="btn btn-primary btn-sm">
-              <Upload className="h-3.5 w-3.5" aria-hidden /> Upload
-            </Link>
-            <Link href="/templates" className="btn btn-ghost btn-sm">
-              <Table2 className="h-3.5 w-3.5" aria-hidden /> From a template
-            </Link>
+            {canDraft && (
+              <>
+                <Link href="/questionnaires/upload" className="btn btn-primary btn-sm">
+                  <Upload className="h-3.5 w-3.5" aria-hidden /> Upload
+                </Link>
+                <Link href="/templates" className="btn btn-ghost btn-sm">
+                  <Table2 className="h-3.5 w-3.5" aria-hidden /> From a template
+                </Link>
+              </>
+            )}
           </>
         }
       />
@@ -59,9 +65,11 @@ export default function QuestionnairesPage() {
           title="No questionnaires yet"
           text="Upload a vendor questionnaire (CSV or Excel), or start an assessment from one of the built-in templates."
         >
-          <Link href="/questionnaires/upload" className="btn btn-primary btn-sm">
-            Upload questionnaire
-          </Link>
+          {canDraft && (
+            <Link href="/questionnaires/upload" className="btn btn-primary btn-sm">
+              Upload questionnaire
+            </Link>
+          )}
           <Link href="/templates" className="btn btn-ghost btn-sm">
             Browse templates
           </Link>

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/apiHandler";
+import { rolesFor } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { updateKnowledgeEntrySchema } from "@/lib/validators/knowledge";
 import { RATE_LIMITS } from "@/lib/rateLimit";
 import { audit } from "@/lib/audit";
+import { refreshEntryEmbedding } from "@/lib/services/EmbeddingService";
 
 // GET /api/knowledge/:id
 export const GET = apiHandler(
@@ -41,6 +43,10 @@ export const PATCH = apiHandler(
       include: { source: { select: { name: true, sourceType: true } } },
     });
 
+    if (updated.question !== entry.question || updated.answer !== entry.answer) {
+      await refreshEntryEmbedding(updated.id, updated.question, updated.answer, { changed: true });
+    }
+
     await audit({
       organizationId,
       userId: user.id,
@@ -58,7 +64,7 @@ export const PATCH = apiHandler(
 
     return NextResponse.json(updated);
   },
-  { schema: updateKnowledgeEntrySchema },
+  { roles: rolesFor("knowledge"), schema: updateKnowledgeEntrySchema },
 );
 
 // DELETE /api/knowledge/:id
@@ -85,4 +91,4 @@ export const DELETE = apiHandler(async ({ req, params, user, organizationId }) =
     req,
   });
   return NextResponse.json({ success: true });
-});
+}, { roles: rolesFor("knowledge") });
