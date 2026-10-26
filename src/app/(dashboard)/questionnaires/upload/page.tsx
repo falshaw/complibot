@@ -6,8 +6,9 @@ import { useRouter } from "next/navigation";
 import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ReadOnlyNote, useCan } from "@/components/RoleContext";
 
-export default function QuestionnaireUploadPage() {
+function QuestionnaireUploadForm() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
@@ -95,4 +96,18 @@ export default function QuestionnaireUploadPage() {
       </form>
     </div>
   );
+}
+
+/** Roles that cannot upload questionnaires get a note instead of a form that would fail. */
+export default function QuestionnaireUploadPage() {
+  const allowed = useCan("draft");
+  if (!allowed) {
+    return (
+      <>
+        <PageHeader eyebrow="Questionnaires" title="Upload a questionnaire" />
+        <ReadOnlyNote permission="draft" what="upload questionnaires" />
+      </>
+    );
+  }
+  return <QuestionnaireUploadForm />;
 }

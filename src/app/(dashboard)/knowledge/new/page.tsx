@@ -6,8 +6,9 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { KnowledgeForm, type KnowledgeFormValues } from "@/components/KnowledgeForm";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ReadOnlyNote, useCan } from "@/components/RoleContext";
 
-export default function NewKnowledgeEntryPage() {
+function NewKnowledgeEntryForm() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
 
@@ -48,4 +49,18 @@ export default function NewKnowledgeEntryPage() {
       </section>
     </div>
   );
+}
+
+/** Roles that cannot add knowledge-base entries get a note instead of a form that would fail. */
+export default function NewKnowledgeEntryPage() {
+  const allowed = useCan("knowledge");
+  if (!allowed) {
+    return (
+      <>
+        <PageHeader eyebrow="Knowledge base" title="New entry" />
+        <ReadOnlyNote permission="knowledge" what="add knowledge-base entries" />
+      </>
+    );
+  }
+  return <NewKnowledgeEntryForm />;
 }

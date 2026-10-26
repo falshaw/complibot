@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useRole } from "@/components/RoleContext";
+import { PASSWORD_MIN_LENGTH, passwordSchema } from "@/lib/validators/password";
 import { LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { plural } from "@/lib/ui/labels";
 
@@ -15,8 +17,14 @@ interface OrgData {
   userCount: number;
 }
 
+interface Me {
+  name: string | null;
+  email: string;
+  role: string;
+}
+
 export default function SettingsPage() {
-  const { data: session } = useSession();
+  const isAdmin = useRole() === "ADMIN";
   const [org, setOrg] = useState<OrgData | null>(null);
   const [name, setName] = useState("");
   const [threshold, setThreshold] = useState(0.8);
@@ -54,6 +62,22 @@ export default function SettingsPage() {
   }
 
   if (!org) return <LoadingBlocks rows={3} />;
+
+  if (!isAdmin) {
+    return (
+      <div className="max-w-2xl">
+        <PageHeader eyebrow="Tools" title="Settings" />
+        <section className="card mb-4 p-5">
+          <h2 className="mb-2">Organization</h2>
+          <p className="text-[13.5px]">
+            <b>{org.name}</b> · confidence threshold <b className="font-mono">{org.confidenceThreshold.toFixed(2)}</b>
+          </p>
+          <p className="mt-1 text-xs text-ink-65">Only admins change the organization settings.</p>
+        </section>
+        <AccountSection />
+      </div>
+    );
+  }
 
   const t = Math.round(threshold * 100);
   const flagFloor = Math.round(threshold * 62.5);
@@ -135,23 +159,137 @@ export default function SettingsPage() {
         </button>
       </section>
 
-      <section className="card p-5">
-        <h2 className="mb-3">Your account</h2>
-        <dl className="grid gap-2 text-[13px]">
-          <div className="flex justify-between gap-3">
-            <dt className="text-ink-65">Name</dt>
-            <dd>{session?.user?.name || "—"}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-ink-65">Email</dt>
-            <dd className="truncate">{session?.user?.email || "—"}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-ink-65">Role</dt>
-            <dd>{session?.user?.role || "—"}</dd>
-          </div>
-        </dl>
-      </section>
+      <AccountSection />
     </div>
+  );
+}
+
+/** Your own name and password: every role may change these. */
+function AccountSection() {
+  const router = useRouter();
+  const [me, setMe] = useState<Me | null>(null);
+  const [name, setName] = useState("");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/account")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Me | null) => {
+        if (!d) return;
+        setMe(d);
+        setName(d.name ?? "");
+      })
+      .catch(() => {});
+  }, []);
+
+  async function patch(body: Record<string, string>) {
+    const res = await fetch("/api/account", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.details?.[0]?.message || data.error || "Could not save");
+  }
+
+  async function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy("name");
+    try {
+      await patch({ name: name.trim() });
+      setMe((m) => (m ? { ...m, name: name.trim() } : m));
+      toast.success("Name saved");
+      router.refresh(); // the sidebar shows the name
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function savePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwError("");
+    const rule = passwordSchema.safeParse(next);
+    if (!rule.success) return setPwError(rule.error.issues[0].message);
+    if (next !== repeat) return setPwError("The new passwords do not match");
+    setBusy("password");
+    try {
+      await patch({ currentPassword: current, newPassword: next });
+      setCurrent("");
+      setNext("");
+      setRepeat("");
+      toast.success("Password changed");
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Could not change the password");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!me) return null;
+
+  return (
+    <section className="card p-5">
+      <h2 className="mb-3">Your account</h2>
+      <p className="mb-4 text-[13px] text-ink-65">
+        {me.email} · {me.role.charAt(0) + me.role.slice(1).toLowerCase()}
+      </p>
+      <form className="mb-5 grid gap-2" onSubmit={saveName}>
+        <label className="grid gap-1.5">
+          <span className="text-[13px] font-semibold">Display name</span>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} autoComplete="name" />
+        </label>
+        <div>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!!busy || !name.trim() || name.trim() === (me.name ?? "")}>
+            {busy === "name" ? "Saving…" : "Save name"}
+          </button>
+        </div>
+      </form>
+      <form className="grid gap-2" onSubmit={savePassword} noValidate>
+        <span className="text-[13px] font-semibold">Change password</span>
+        <input
+          className="input"
+          type="password"
+          aria-label="Current password"
+          placeholder="Current password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+        />
+        <input
+          className="input"
+          type="password"
+          aria-label="New password"
+          placeholder={`New password (at least ${PASSWORD_MIN_LENGTH} characters with a special character)`}
+          autoComplete="new-password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+        />
+        <input
+          className="input"
+          type="password"
+          aria-label="Repeat the new password"
+          placeholder="Repeat the new password"
+          autoComplete="new-password"
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value)}
+        />
+        {pwError && (
+          <p className="text-[13px] font-medium text-red" role="alert">
+            {pwError}
+          </p>
+        )}
+        <div>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!!busy || !current || !next || !repeat}>
+            {busy === "password" ? "Saving…" : "Change password"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }

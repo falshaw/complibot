@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
-import { can } from "@/lib/permissions";
 import { plural } from "@/lib/ui/labels";
+import { useCan } from "@/components/RoleContext";
 
 interface DomainAnalysis {
   domain: string;
@@ -37,7 +36,7 @@ const COVERAGE: Record<DomainAnalysis["coverage"], { badge: string; bar: string 
 };
 
 export default function GapAnalysisPage() {
-  const canEdit = can(useSession().data?.user?.role, "knowledge");
+  const canEdit = useCan("knowledge");
   const [data, setData] = useState<GapData | null>(null);
   const [failed, setFailed] = useState(false);
 

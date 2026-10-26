@@ -2,14 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { KnowledgeForm, type KnowledgeFormValues } from "@/components/KnowledgeForm";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel } from "@/lib/ui/labels";
-import { can } from "@/lib/permissions";
+import { useCan } from "@/components/RoleContext";
 
 interface KnowledgeEntry {
   id: string;
@@ -36,7 +35,7 @@ function fmt(iso: string) {
 export default function KnowledgeEntryPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const canEdit = can(useSession().data?.user?.role, "knowledge");
+  const canEdit = useCan("knowledge");
   const [entry, setEntry] = useState<KnowledgeEntry | null>(null);
   const [missing, setMissing] = useState(false);
   const [editing, setEditing] = useState(false);

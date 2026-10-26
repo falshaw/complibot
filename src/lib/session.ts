@@ -10,7 +10,7 @@ import { logger } from "./logger";
 /**
  * The signed-in user, checked against the database: a member who was removed
  * gets no session even while their sign-in token is still valid, and a role
- * change applies at once instead of at the next sign-in.
+ * change (or a new display name) applies at once instead of at the next sign-in.
  */
 export async function getSession(): Promise<Session | null> {
   try {
@@ -18,13 +18,14 @@ export async function getSession(): Promise<Session | null> {
     if (!session?.user?.id) return null;
     const current = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { isActive: true, role: true, organizationId: true },
+      select: { isActive: true, role: true, organizationId: true, name: true },
     });
     if (!current?.isActive) return null;
     return {
       ...session,
       user: {
         ...session.user,
+        name: current.name,
         role: current.role,
         organizationId: current.organizationId,
       },

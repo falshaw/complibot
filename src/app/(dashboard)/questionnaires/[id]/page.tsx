@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { CitedEntry, type CitedSource } from "@/components/CitedEntry";
@@ -13,6 +12,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { answerStatus, domainLabel, typeLabel } from "@/lib/ui/labels";
 import { can } from "@/lib/permissions";
 import { needsEditBeforeApproval } from "@/lib/services/answerQuality";
+import { useRole } from "@/components/RoleContext";
 
 interface Answer {
   id: string;
@@ -73,7 +73,7 @@ async function errorText(res: Response, fallback: string) {
 export default function QuestionnaireReviewPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const role = useSession().data?.user?.role;
+  const role = useRole();
   const canDraft = can(role, "draft");
   const canReview = can(role, "review");
   const canDelete = can(role, "admin");

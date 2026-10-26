@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import { FileText, Table2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { DeleteQuestionnaireButton } from "@/components/DeleteQuestionnaireButton";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { pct, questionnaireStatus } from "@/lib/ui/labels";
 import { can } from "@/lib/permissions";
+import { useRole } from "@/components/RoleContext";
 
 interface Questionnaire {
   id: string;
@@ -24,7 +24,7 @@ interface Questionnaire {
 
 export default function QuestionnairesPage() {
   const [items, setItems] = useState<Questionnaire[] | null>(null);
-  const role = useSession().data?.user?.role;
+  const role = useRole();
   const canDraft = can(role, "draft");
   const canDelete = can(role, "admin");
 

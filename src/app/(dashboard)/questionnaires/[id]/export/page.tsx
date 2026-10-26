@@ -7,6 +7,7 @@ import { CheckCircle2, CircleAlert, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel, pct } from "@/lib/ui/labels";
+import { ReadOnlyNote, useCan } from "@/components/RoleContext";
 
 interface Preview {
   name: string;
@@ -36,6 +37,7 @@ function fileNameFrom(res: Response, fallback: string) {
 
 export default function ExportPage() {
   const { id } = useParams<{ id: string }>();
+  const canExport = useCan("draft");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [missing, setMissing] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -173,28 +175,34 @@ export default function ExportPage() {
         </section>
       </div>
 
-      <section className="card mt-4 p-5">
-        <h2 className="mb-3">Download</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {FORMATS.filter((f) => f.id !== "filled" || preview.fileName).map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => download(f.id)}
-              disabled={!!exporting}
-              className="flex items-start gap-3 rounded-2xl border border-g-line bg-g-bg p-4 text-left hover:border-accent disabled:opacity-60"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
-                {exporting === f.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
-              </span>
-              <span>
-                <b className="block">{f.label}</b>
-                <small className="text-xs text-ink-65">{f.hint}</small>
-              </span>
-            </button>
-          ))}
+      {canExport ? (
+        <section className="card mt-4 p-5">
+          <h2 className="mb-3">Download</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {FORMATS.filter((f) => f.id !== "filled" || preview.fileName).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => download(f.id)}
+                disabled={!!exporting}
+                className="flex items-start gap-3 rounded-2xl border border-g-line bg-g-bg p-4 text-left hover:border-accent disabled:opacity-60"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+                  {exporting === f.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
+                </span>
+                <span>
+                  <b className="block">{f.label}</b>
+                  <small className="text-xs text-ink-65">{f.hint}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="mt-4">
+          <ReadOnlyNote permission="draft" what="export answers" />
         </div>
-      </section>
+      )}
     </div>
   );
 }

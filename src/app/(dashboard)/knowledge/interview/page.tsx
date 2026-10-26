@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { Loader2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ReadOnlyNote, useCan } from "@/components/RoleContext";
 
-export default function StartInterviewPage() {
+function StartInterviewForm() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -47,4 +48,18 @@ export default function StartInterviewPage() {
       </section>
     </>
   );
+}
+
+/** Roles that cannot run the AI interview get a note instead of a form that would fail. */
+export default function StartInterviewPage() {
+  const allowed = useCan("knowledge");
+  if (!allowed) {
+    return (
+      <>
+        <PageHeader eyebrow="Tools" title="AI interview" />
+        <ReadOnlyNote permission="knowledge" what="run the AI interview, which adds knowledge-base entries" />
+      </>
+    );
+  }
+  return <StartInterviewForm />;
 }

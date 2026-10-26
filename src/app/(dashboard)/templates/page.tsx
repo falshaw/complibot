@@ -8,7 +8,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { Copy, Eye, Loader2, Pencil, Play, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -16,6 +15,7 @@ import { TemplateEditor, type EditableTemplate } from "@/components/TemplateEdit
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel, typeLabel } from "@/lib/ui/labels";
 import { can } from "@/lib/permissions";
+import { useRole } from "@/components/RoleContext";
 
 interface TemplateQuestion {
   text: string;
@@ -58,7 +58,7 @@ export default function TemplatesPage() {
   const [editing, setEditing] = useState<EditableTemplate | null>(null);
   const [deleting, setDeleting] = useState<Template | null>(null);
   const [deleteError, setDeleteError] = useState("");
-  const role = useSession().data?.user?.role;
+  const role = useRole();
   const canWrite = can(role, "draft");
 
   const load = useCallback(async () => {
