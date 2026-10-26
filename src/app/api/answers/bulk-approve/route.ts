@@ -16,6 +16,9 @@ export const POST = apiHandler(
     const found = await prisma.answer.findMany({
       where: {
         id: { in: body.answerIds },
+        // Bulk approve is for drafts waiting for a first decision: a rejected
+        // or flagged answer needs someone to open it
+        status: "PENDING",
         question: { questionnaire: { organizationId } },
       },
       select: {

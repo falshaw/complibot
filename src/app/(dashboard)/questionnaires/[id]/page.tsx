@@ -85,6 +85,7 @@ export default function QuestionnaireReviewPage() {
   const [editContent, setEditContent] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const initialPick = useRef(false);
 
   const fetchData = useCallback(async () => {
@@ -181,8 +182,9 @@ export default function QuestionnaireReviewPage() {
     if (done) go(1);
   }
 
-  function regenerate() {
+  async function regenerate() {
     if (!answer) return;
+    setConfirmRegenerate(false);
     return act("regenerate", `/api/answers/${answer.id}/regenerate`, { method: "POST" }, "New draft generated", "Could not regenerate the answer");
   }
 
@@ -315,7 +317,9 @@ export default function QuestionnaireReviewPage() {
   const pendingCount = questions.filter((x) => x.answers[0]?.status === "PENDING").length;
   const generating = q.status === "GENERATING" || busy === "generate";
   const shown = answer ? answer.editedContent || answer.content : "";
-  const lowConfidence = !!answer && answer.status !== "APPROVED" && answer.confidence < threshold;
+  // The score belongs to the generated draft; a hand-written answer has none
+  const lowConfidence =
+    !!answer && !answer.editedContent && answer.status !== "APPROVED" && answer.confidence < threshold;
   const notCovered =
     !!answer &&
     needsEditBeforeApproval({ ...answer, sourceCount: answer.sources.length });
@@ -453,11 +457,16 @@ export default function QuestionnaireReviewPage() {
                     <span>
                       Type <b className="font-semibold text-ink">{typeLabel(current.questionType)}</b>
                     </span>
-                    {answer && (
-                      <span>
-                        Confidence <b className="font-mono font-semibold text-ink">{answer.confidence.toFixed(2)}</b>
-                      </span>
-                    )}
+                    {answer &&
+                      (answer.editedContent ? (
+                        <span title={`The generated draft scored ${answer.confidence.toFixed(2)}`}>
+                          <b className="font-semibold text-ink">Edited by hand</b>
+                        </span>
+                      ) : (
+                        <span>
+                          Confidence <b className="font-mono font-semibold text-ink">{answer.confidence.toFixed(2)}</b>
+                        </span>
+                      ))}
                   </div>
                 </div>
                 <span className={`badge ${answerStatus(answer?.status).badge}`}>
@@ -534,7 +543,12 @@ export default function QuestionnaireReviewPage() {
                     <div className="flex flex-wrap justify-end gap-2">
                       {canDraft && (
                         <>
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={!!busy}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => (answer.editedContent ? setConfirmRegenerate(true) : regenerate())}
+                            disabled={!!busy}
+                          >
                             {busy === "regenerate" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
                             {busy === "regenerate" ? "Regenerating…" : "Regenerate"}
                           </button>
@@ -607,6 +621,18 @@ export default function QuestionnaireReviewPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmRegenerate}
+        title="Replace the edited answer?"
+        confirmLabel="Regenerate"
+        busy={busy === "regenerate"}
+        onConfirm={regenerate}
+        onCancel={() => setConfirmRegenerate(false)}
+      >
+        This answer was edited by hand. Regenerating drafts a new answer from the knowledge base and discards the
+        edit (the audit trail keeps a copy of it).
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={confirmBulk}

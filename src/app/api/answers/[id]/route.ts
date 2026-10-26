@@ -42,7 +42,13 @@ export const PATCH = apiHandler(
         id: params.id,
         question: { questionnaire: { organizationId } },
       },
-      select: { id: true, question: { select: { questionnaireId: true } } },
+      select: {
+        id: true,
+        status: true,
+        content: true,
+        editedContent: true,
+        question: { select: { questionnaireId: true } },
+      },
     });
 
     if (!existing) {
@@ -70,6 +76,15 @@ export const PATCH = apiHandler(
       action: "answer.edit",
       entityType: "Answer",
       entityId: answer.id,
+      // What the text was before, and whether an approval was undone
+      details: {
+        statusBefore: existing.status,
+        statusAfter: answer.status,
+        ...(body.editedContent !== undefined && {
+          previousText: (existing.editedContent ?? existing.content).slice(0, 1000),
+        }),
+        ...(body.reviewNote !== undefined && { reviewNote: body.reviewNote.slice(0, 200) }),
+      },
       req,
     });
 

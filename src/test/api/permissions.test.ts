@@ -46,7 +46,6 @@ import { PATCH as knowledgePatch, DELETE as knowledgeDelete } from "@/app/api/kn
 import { POST as sourcesPost } from "@/app/api/sources/route";
 import { DELETE as sourcesDelete } from "@/app/api/sources/[id]/route";
 import { POST as questionnairePost } from "@/app/api/questionnaires/route";
-import { POST as bulkUpload } from "@/app/api/questionnaires/bulk-upload/route";
 import { POST as fromTemplate } from "@/app/api/questionnaires/from-template/route";
 import { DELETE as questionnaireDelete } from "@/app/api/questionnaires/[id]/route";
 import { POST as parse } from "@/app/api/questionnaires/[id]/parse/route";
@@ -79,7 +78,6 @@ const ROUTES: Array<[string, Handler, Permission]> = [
   ["POST /api/sources", sourcesPost, "knowledge"],
   ["DELETE /api/sources/:id", sourcesDelete, "knowledge"],
   ["POST /api/questionnaires", questionnairePost, "draft"],
-  ["POST /api/questionnaires/bulk-upload", bulkUpload as unknown as Handler, "draft"],
   ["POST /api/questionnaires/from-template", fromTemplate, "draft"],
   ["POST /api/questionnaires/:id/parse", parse, "draft"],
   ["POST /api/questionnaires/:id/generate", generate, "draft"],

@@ -80,6 +80,19 @@ export function exportedText(answer: Pick<LoadedAnswer, "status" | "content" | "
   return answer.editedContent || answer.content;
 }
 
+/** The generated draft's score; a hand-edited answer has none of its own. */
+export function confidenceLabel(answer: Pick<LoadedAnswer, "confidence" | "editedContent"> | undefined): string {
+  if (!answer) return "";
+  return answer.editedContent ? "edited by hand" : `${Math.round(answer.confidence * 100)}%`;
+}
+
+/** What the report prints where an answer is not exported. */
+export function notExportedText(status: string | undefined): string {
+  if (status === "REJECTED") return "(Rejected, not exported)";
+  if (status === "PENDING" || status === "FLAGGED") return "(Waiting for review, not exported)";
+  return "(Not answered yet)";
+}
+
 export function statusLabel(status: string | undefined): string {
   return status ? (STATUS_LABELS[status] ?? status) : "No answer";
 }
@@ -113,12 +126,12 @@ async function reviewWorkbook(q: LoadedQuestionnaire): Promise<Buffer> {
       question: question.questionText,
       answer: exportedText(answer),
       status: statusLabel(answer?.status),
-      confidence: answer ? `${Math.round(answer.confidence * 100)}%` : "",
+      confidence: confidenceLabel(answer),
       domain: domainLabel(question.domain),
       sources: answer?.sources.map((s) => s.knowledgeEntry.question.slice(0, 50)).join("; ") ?? "",
     });
     row.alignment = { vertical: "top", wrapText: true };
-    if (answer) {
+    if (answer && !answer.editedContent) {
       const argb = answer.confidence >= 0.8 ? "D1FAE5" : answer.confidence >= 0.5 ? "FEF3C7" : "FEE2E2";
       row.getCell("confidence").fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
     }
@@ -164,7 +177,7 @@ export function textReport(q: LoadedQuestionnaire, date = new Date()): string {
     out.push(`    Domain: ${domainLabel(x.domain)} | Status: ${statusLabel(answer?.status)}`);
     out.push("");
     let line = "    ";
-    for (const word of (text || "(Not answered yet)").split(/\s+/)) {
+    for (const word of (text || notExportedText(answer?.status)).split(/\s+/)) {
       if (line.length + word.length > 78) {
         out.push(line);
         line = "    " + word;
