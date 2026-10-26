@@ -12,13 +12,13 @@ Security questionnaires repeat the same questions in different wording. Answerin
 
 - **Questionnaire upload and parsing**: Excel (`.xlsx`) and CSV. The question column is detected automatically (or set explicitly), questions are classified by type (yes/no, free text, date, numeric, evidence, multiple choice) and security domain (20 domains). Questionnaires can be deleted with everything drafted for them.
 - **RAG answer generation**: keyword search (always on) plus optional pgvector semantic search over the knowledge base. Weak matches are dropped before the LLM sees them, the LLM states which sources it used, and only those are cited. Each draft gets a confidence score that reflects how well the cited entries support it (see [How drafts are scored](#how-drafts-are-scored)).
-- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; drafts below the organization's threshold are flagged; approve, reject, edit or regenerate answers; bulk-approve (with a confirmation). An edited answer goes back to review, and a draft that says the knowledge base does not cover the question cannot be approved until someone writes the answer.
+- **Review workflow**: each draft shows its confidence and the knowledge-base entries it cites; drafts below the organization's threshold are flagged; approve, reject, edit or regenerate answers; bulk-approve pending drafts (with a confirmation). An edited answer goes back to review and is marked "edited by hand" instead of carrying the generated draft's score; Regenerate asks before it replaces an edit. A draft that says the knowledge base does not cover the question cannot be approved until someone writes the answer.
 - **Export**: only approved answers leave the app. **Fill the uploaded file** writes them into the customer's own spreadsheet (its Response column, same rows and layout); there is also a review workbook (answers with status, confidence and sources) and a text report.
-- **Knowledge base**: add, edit, verify and delete entries, import question/answer pairs from spreadsheets, search, per-domain stats, and a **gap analysis** that shows thin domains.
+- **Knowledge base**: add, edit, verify and delete entries (changing a verified entry's text unverifies it), import question/answer pairs from spreadsheets (rows already in the knowledge base are skipped; an imported file can be deleted with its entries), search, per-domain stats, and a **gap analysis** that shows thin domains.
 - **Knowledge interview**: an AI-led interview that cycles through security domains and turns your replies into knowledge-base entries. When a reply already answers the next questions of a domain, those are skipped.
 - **Templates**: seven short sample question sets (12–18 questions each) modelled on the topics of SIG Lite, CAIQ, VSA, NIST CSF, ISO 27001, CIS Controls v8 and SOC 2. They are not the official or licensed questionnaires. Copy one to make your own, then edit or delete the copy; the built-ins are read-only.
-- **Teams and roles**: admin, reviewer, responder and viewer, enforced on every API route (see [Roles](#roles)); invitations by one-time join link (no email, no public sign-up), role changes, removing and reactivating members.
-- **Audit trail**: review decisions, knowledge-base changes, uploads, deletions, exports, template edits, settings and team changes, recorded per organization.
+- **Teams and roles**: admin, reviewer, responder and viewer, enforced on every API route (see [Roles](#roles)); invitations by one-time join link (no email, no public sign-up), role changes, removing and reactivating members, lifting a login lockout; every member changes their own name and password under **Settings**.
+- **Audit trail**: review decisions, knowledge-base changes, uploads, deletions, exports, template edits, settings, account and team changes, recorded per organization; an edited or regenerated answer keeps the replaced text in its entry.
 - **Security**: CSRF protection in middleware, Redis-backed rate limiting, login lockout, input sanitization, AES-256-GCM field encryption, least-privilege database role, hardened containers (read-only root, dropped capabilities, resource limits).
 
 ## Quick start
@@ -111,7 +111,11 @@ There is no public sign-up. The seed creates `admin@demo.com` (admin) and `revie
 
 The link works once and expires after 7 days. Only a SHA-256 hash of the token is stored, so a lost link cannot be read back: revoke the pending invitation and invite again. An email that already has an account cannot be invited.
 
-**Remove** blocks a member at once (their open sessions stop working on the next request) and keeps their answers, reviews and audit entries; **Reactivate** brings them back with the same role. Role changes also apply immediately.
+**Remove** blocks a member at once (their open sessions stop working on the next request) and keeps their answers, reviews and audit entries; **Reactivate** brings them back with the same role. Role changes also apply immediately, in the API and in the pages.
+
+Five failed sign-ins within 15 minutes lock an email address for the rest of that window; the login page says so. Failures count for addresses without an account too, so the message does not reveal which accounts exist. The Team page marks a locked member, and an admin can **Unlock** them at once.
+
+Every member changes their own display name and password under **Settings → Your account** (the password change needs the current password). The organization settings there are admin-only.
 
 ### Roles
 
@@ -124,7 +128,7 @@ Every role can read everything in its organization. Writes:
 | Knowledge base: add, edit, verify, delete, import; AI interview | ✓ | ✓ | | |
 | Delete a questionnaire; team and organization settings | ✓ | | | |
 
-The matrix lives in `src/lib/permissions.ts`; the API returns 403 for anything outside it, and the pages hide the buttons a role cannot use.
+The matrix lives in `src/lib/permissions.ts`; the API returns 403 for anything outside it (401 without a sign-in), and the pages hide the buttons a role cannot use; a page whose whole job is a write (new entry, uploads, AI interview, export downloads) shows a note instead.
 
 ![Team page with a one-time join link, light theme](docs/team-invite-light.png)
 
@@ -279,7 +283,7 @@ npm run dev            # http://localhost:3005, uses DATABASE_URL / REDIS_* from
 
 `npm run db:seed` seeds from the host using `DATABASE_URL` in `.env`.
 
-Tests (Vitest, about 225, no database or LLM needed) cover the role matrix on every write route, the approval and export rules, keyword retrieval against the demo knowledge base, the relevance cut-off and confidence scoring (with real `gemma4:31b` drafts as fixtures), citation parsing, question-type detection, question-column detection, questionnaire status transitions, the invitation flow (hashed single-use tokens, expiry, password rules), member removal and reactivation, questionnaire and template deletion, organization scoping of the API routes and benchmark scoring. `npm run test:coverage` reports coverage.
+Tests (Vitest, about 235, no database or LLM needed) cover the role matrix on every write route, the approval and export rules, login lockout and unlock, changing your own name and password, duplicate-free knowledge imports and source deletion, keyword retrieval against the demo knowledge base, the relevance cut-off and confidence scoring (with real `gemma4:31b` drafts as fixtures), citation parsing, question-type detection, question-column detection, questionnaire status transitions, the invitation flow (hashed single-use tokens, expiry, password rules), member removal and reactivation, questionnaire and template deletion, organization scoping of the API routes and benchmark scoring. `npm run test:coverage` reports coverage.
 
 `scripts/benchmark.ts` scores AI answers against reference answers (token-F1 per domain):
 
@@ -303,7 +307,7 @@ Be aware of what it does not do:
 - **Spreadsheets only.** Questionnaires and knowledge sources are imported from `.xlsx` and `.csv`. PDF, Word and the old binary `.xls` format are not supported; to use a policy document, paste the relevant answers into knowledge-base entries or run the knowledge interview.
 - **Drafts, not answers.** Every draft is generated text and can be wrong; a person approves each one before export. The confidence score measures how well the cited entries support the draft, not whether the knowledge base itself is correct or current.
 - **Calibrated for the defaults.** The relevance scale and the confidence weights were tuned with `nomic-embed-text` and the demo knowledge base; another embedding model, or a very different knowledge base, may need other anchors in `relevance.ts`.
-- **No email.** Invitations are passed on as a link by the admin; there is no password reset by email either (an admin removes the member and invites them again).
+- **No email.** Invitations are passed on as a link by the admin; there is no password reset by email either: members change their password under Settings, and a member who forgot it is removed and invited again.
 - **One organization per deployment in practice.** The data model has organizations, but there is no UI to create a second one or to move users between them.
 - **Uploaded files are temporary in Docker.** The app container keeps uploads on a tmpfs: parse a questionnaire before restarting the container (its questions and answers live in Postgres, the file does not). **Fill the uploaded file** needs the file too; after a restart, use the review workbook.
 - **Single instance.** Generation runs inside the web process, one answer at a time on Ollama by default; a long questionnaire on a laptop takes minutes, and it is not a job queue for many users at once.
