@@ -61,7 +61,11 @@ export default function LoginPage() {
     });
 
     if (result?.error) {
-      setError("Invalid email or password");
+      setError(
+        result.code === "locked"
+          ? "Too many failed sign-ins. This account is locked for 15 minutes, or until an admin unlocks it on the Team page."
+          : "Invalid email or password",
+      );
       setLoading(false);
     } else {
       router.push(

@@ -76,27 +76,13 @@ export const authConfig: NextAuthConfig = {
       }
 
       if (!isLoggedIn) {
+        // API clients get a status they can act on, not the login page's HTML
+        if (pathname.startsWith("/api/")) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
         const loginUrl = new URL("/login", request.nextUrl);
         loginUrl.searchParams.set("callbackUrl", pathname);
         return Response.redirect(loginUrl);
-      }
-
-      // Role-based route protection
-      const roleProtectedRoutes: Record<string, Role[]> = {
-        "/settings": ["ADMIN"],
-      };
-
-      const userRole = auth?.user?.role as Role | undefined;
-      if (userRole) {
-        for (const [route, allowedRoles] of Object.entries(
-          roleProtectedRoutes,
-        )) {
-          if (pathname.startsWith(route) && !allowedRoles.includes(userRole)) {
-            return Response.redirect(
-              new URL("/dashboard?error=access_denied", request.nextUrl),
-            );
-          }
-        }
       }
 
       return true;

@@ -2,7 +2,7 @@
  * CompliBot - NextAuth configuration
  */
 
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
@@ -13,40 +13,11 @@ import prisma from "./prisma";
 import type { Role } from "@prisma/client";
 import { authConfig } from "./auth.config";
 import { logger } from "./logger";
-import { getRedisClient } from "./cache";
+import { clearFailedLogins, isLockedOut, recordFailedLogin } from "./lockout";
 
-const LOCKOUT_MAX_ATTEMPTS = 5;
-const LOCKOUT_WINDOW_SECONDS = 900;
-const LOCKOUT_PREFIX = "cb:lockout:";
-
-async function checkAccountLockout(
-  email: string,
-): Promise<{ locked: boolean; attempts: number }> {
-  try {
-    const redis = getRedisClient();
-    const key = `${LOCKOUT_PREFIX}${email.toLowerCase()}`;
-    const attempts = parseInt((await redis.get(key)) || "0", 10);
-    return { locked: attempts >= LOCKOUT_MAX_ATTEMPTS, attempts };
-  } catch {
-    logger.error("Redis unavailable for lockout check", { email });
-    return { locked: true, attempts: LOCKOUT_MAX_ATTEMPTS };
-  }
-}
-
-async function recordFailedLogin(email: string): Promise<void> {
-  try {
-    const redis = getRedisClient();
-    const key = `${LOCKOUT_PREFIX}${email.toLowerCase()}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, LOCKOUT_WINDOW_SECONDS);
-  } catch {}
-}
-
-async function clearFailedLogins(email: string): Promise<void> {
-  try {
-    const redis = getRedisClient();
-    await redis.del(`${LOCKOUT_PREFIX}${email.toLowerCase()}`);
-  } catch {}
+/** Shown on the login page; failures count for unknown emails too, so it reveals nothing. */
+class AccountLocked extends CredentialsSignin {
+  code = "locked";
 }
 
 const loginSchema = z.object({
@@ -57,6 +28,14 @@ const loginSchema = z.object({
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   debug: false,
+  // A failed sign-in is an expected event, not a server error with a stack trace
+  logger: {
+    error(error) {
+      const type = (error as { type?: string }).type ?? error.name;
+      if (type === "CredentialsSignin") logger.info("Sign-in refused", { code: (error as { code?: string }).code });
+      else logger.error("Auth.js error", { type, error: error.message });
+    },
+  },
   secret: process.env.AUTH_SECRET,
   adapter: PrismaAdapter(prisma) as Adapter,
   providers: [
@@ -67,34 +46,27 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
+        // A malformed or too short input is a failed sign-in, not a server error
+        const parsed = loginSchema.safeParse(credentials);
+        if (!parsed.success) return null;
+        const { email, password } = parsed.data;
+
+        if (await isLockedOut(email)) {
+          logger.warn("Sign-in refused: account locked");
+          throw new AccountLocked();
+        }
+
         try {
-          const { email, password } = loginSchema.parse(credentials);
-
-          const lockout = await checkAccountLockout(email);
-          if (lockout.locked) {
-            logger.warn("Account locked", { email });
-            throw new Error(
-              "Account temporarily locked. Try again in 15 minutes.",
-            );
-          }
-
           const user = await prisma.user.findUnique({
             where: { email },
             include: { organization: true },
           });
 
-          if (!user || !user.passwordHash) {
-            await recordFailedLogin(email);
-            return null;
-          }
-
-          if (!user.isActive) throw new Error("Account is disabled");
-
-          const isValidPassword = await bcrypt.compare(
-            password,
-            user.passwordHash,
-          );
-          if (!isValidPassword) {
+          const isValid =
+            !!user?.passwordHash &&
+            user.isActive &&
+            (await bcrypt.compare(password, user.passwordHash));
+          if (!user || !isValid) {
             await recordFailedLogin(email);
             return null;
           }

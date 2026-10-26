@@ -1,7 +1,7 @@
 /**
  * CompliBot — Team Members API (CB-02)
  * GET: list team members
- * PUT: update member role
+ * PUT: update member role, deactivate/reactivate, lift a login lockout
  * DELETE: remove member
  */
 
@@ -10,6 +10,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { apiHandler } from "@/lib/apiHandler";
+import { clearFailedLogins, lockedEmails } from "@/lib/lockout";
 
 // GET /api/team/members — list org members
 export const GET = apiHandler(async ({ organizationId }) => {
@@ -26,7 +27,8 @@ export const GET = apiHandler(async ({ organizationId }) => {
     },
     orderBy: { createdAt: "asc" },
   });
-  return NextResponse.json(members);
+  const locked = await lockedEmails(members.map((m) => m.email));
+  return NextResponse.json(members.map((m) => ({ ...m, locked: locked.has(m.email) })));
 });
 
 // PUT /api/team/members — update member role or deactivate
@@ -34,6 +36,8 @@ const updateSchema = z.object({
   userId: z.string(),
   role: z.enum(["ADMIN", "RESPONDER", "REVIEWER", "VIEWER"]).optional(),
   isActive: z.boolean().optional(),
+  // Lift a login lockout (5 failed sign-ins) before its 15 minutes are up
+  unlock: z.literal(true).optional(),
 });
 
 export const PUT = apiHandler(
@@ -45,7 +49,8 @@ export const PUT = apiHandler(
       );
     }
 
-    if (body.userId === user.id) {
+    // Unlocking yourself is fine (someone guessed at your password while you were signed in)
+    if (body.userId === user.id && (body.role || body.isActive !== undefined)) {
       return NextResponse.json(
         { error: "Cannot modify your own role" },
         { status: 400 },
@@ -57,6 +62,20 @@ export const PUT = apiHandler(
     });
     if (!target) {
       return NextResponse.json({ error: "Member not found" }, { status: 404 });
+    }
+
+    if (body.unlock) {
+      await clearFailedLogins(target.email);
+      await audit({
+        organizationId,
+        userId: user.id,
+        action: "team.member_unlock",
+        entityType: "User",
+        entityId: target.id,
+        details: { email: target.email },
+        req,
+      });
+      if (!body.role && body.isActive === undefined) return NextResponse.json({ success: true });
     }
 
     const updated = await prisma.user.update({
