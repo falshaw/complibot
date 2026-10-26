@@ -91,6 +91,9 @@ describe("text report", () => {
     expect(text).toMatch(/^1\. Is customer data/m);
     expect(text).toMatch(/^4\. Vulnerability scanning/m);
     expect(text).toContain("Status: Rejected");
+    expect(text).toContain("(Rejected, not exported)");
+    expect(text).toContain("(Waiting for review, not exported)");
+    expect(text).toContain("(Not answered yet)");
     expect(text).not.toContain("VULNERABILITY_MANAGEMENT");
     expect(file.fileName).toMatch(/^Vendor_A_Q4_report_\d{4}-\d{2}-\d{2}\.txt$/);
   });
@@ -109,6 +112,9 @@ describe("review workbook", () => {
     expect(sheet.getRow(2).getCell(3).value).toBe("AES-256 on every volume.");
     expect(sheet.getRow(3).getCell(3).value ?? "").toBe("");
     expect(sheet.getRow(3).getCell(4).value).toBe("Rejected");
+    // a hand-edited answer has no generated score of its own
+    expect(sheet.getRow(2).getCell(5).value).toBe("edited by hand");
+    expect(sheet.getRow(3).getCell(5).value).toBe("90%");
     expect(db.questionnaire.update).toHaveBeenCalledWith({ where: { id: "qn-1" }, data: { status: "EXPORTED" } });
   });
 });

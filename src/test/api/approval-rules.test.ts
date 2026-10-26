@@ -101,11 +101,27 @@ describe("bulk approve", () => {
     expect(await res.json()).toEqual({ approved: 1, skipped: 1 });
     expect(db.answer.updateMany.mock.calls[0][0].where).toEqual({ id: { in: ["a-2"] } });
   });
+
+  it("only touches pending drafts, whatever ids it is sent", async () => {
+    db.answer.findMany.mockResolvedValue([]);
+    db.answer.updateMany.mockResolvedValue({ count: 0 });
+
+    await bulkPOST(req("/api/answers/bulk-approve", json({ answerIds: ["rejected-1"] })));
+
+    expect(db.answer.findMany.mock.calls[0][0].where.status).toBe("PENDING");
+  });
 });
 
 describe("edit", () => {
   it("sends an approved answer back to review and refreshes the counts", async () => {
-    db.answer.findFirst.mockResolvedValue({ id: "a-1", question: { questionnaireId: "qn-1" } });
+    db.answer.findFirst.mockResolvedValue({
+      id: "a-1",
+      status: "APPROVED",
+      content: "Old draft.",
+      editedContent: null,
+      question: { questionnaireId: "qn-1" },
+    });
+    db.answer.update.mockResolvedValue({ id: "a-1", status: "PENDING" });
 
     const res = await answerPATCH(
       req("/api/answers/a-1", { ...json({ editedContent: "New text." }), method: "PATCH" }),
@@ -118,6 +134,12 @@ describe("edit", () => {
       status: "PENDING",
     });
     expect(db.questionnaire.update).toHaveBeenCalled();
+    // the audit entry keeps the old text and shows the approval was undone
+    expect(db.auditLog.create.mock.calls[0][0].data.details).toMatchObject({
+      statusBefore: "APPROVED",
+      statusAfter: "PENDING",
+      previousText: "Old draft.",
+    });
   });
 
   it("keeps the decision when only the review note changes", async () => {

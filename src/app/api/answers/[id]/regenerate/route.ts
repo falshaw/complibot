@@ -68,6 +68,11 @@ export const POST = apiHandler(
       details: {
         confidence: Math.round(confidence * 100) / 100,
         sources: sourceIds.length,
+        statusBefore: existingAnswer.status,
+        // The page asks before this happens; the audit trail keeps the text
+        ...(existingAnswer.editedContent && {
+          discardedEdit: existingAnswer.editedContent.slice(0, 1000),
+        }),
       },
       req,
     });
