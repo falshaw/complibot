@@ -292,7 +292,7 @@ export async function ingestQuestionnaireAsKB(
   filePath: string,
   mapping: ColumnMapping,
   organizationId: string,
-): Promise<{ entriesCreated: number }> {
+): Promise<{ entriesCreated: number; entriesSkipped: number }> {
   if (!mapping.answerCol) {
     throw new Error("Answer column required for KB ingestion");
   }
@@ -306,8 +306,23 @@ export async function ingestQuestionnaireAsKB(
     (q) => q.existingAnswer && q.existingAnswer.length > 5,
   );
 
+  // Importing the same file twice (or a file that repeats entries) must not
+  // double the knowledge base: the same question with the same answer is skipped.
+  const existing = await prisma.knowledgeEntry.findMany({
+    where: { organizationId },
+    select: { question: true, answer: true },
+  });
+  const seen = new Set(existing.map((e) => entryKey(e.question, e.answer)));
+
   let entriesCreated = 0;
+  let entriesSkipped = 0;
   for (const q of withAnswers) {
+    const key = entryKey(q.questionText, q.existingAnswer!);
+    if (seen.has(key)) {
+      entriesSkipped++;
+      continue;
+    }
+    seen.add(key);
     const domain = await classifyDomain(q.questionText);
 
     const entry = await prisma.knowledgeEntry.create({
@@ -327,10 +342,16 @@ export async function ingestQuestionnaireAsKB(
   // Update source
   await prisma.knowledgeSource.update({
     where: { id: sourceId },
-    data: { status: "completed", entriesCreated },
+    data: { status: "completed", entriesCreated, entriesSkipped },
   });
 
-  return { entriesCreated };
+  return { entriesCreated, entriesSkipped };
+}
+
+/** Case, spacing and trailing punctuation do not make an entry new. */
+export function entryKey(question: string, answer: string): string {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim().replace(/[\s.?!]+$/, "");
+  return `${norm(question)}|${norm(answer)}`;
 }
 
 // Helper: Convert column letter to number (A=1, B=2, ..., AA=27)

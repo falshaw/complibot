@@ -32,7 +32,10 @@ function KnowledgeUploadForm() {
       const s = await res.json();
       const n: number = s.entriesCreated || s._count?.knowledgeEntries || 0;
       if (s.status === "completed") {
-        toast.success(`${plural(n, "entry", "entries")} imported from ${s.name}`);
+        toast.success(
+          `${plural(n, "entry", "entries")} imported from ${s.name}` +
+            (s.entriesSkipped ? `; ${plural(s.entriesSkipped, "row")} skipped, already in the knowledge base` : ""),
+        );
         return;
       }
       if (s.status === "failed") {

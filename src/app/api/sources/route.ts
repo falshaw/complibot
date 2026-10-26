@@ -36,6 +36,8 @@ export const GET = apiHandler(async ({ req, organizationId }) => {
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
       take: limit,
+      // entries still in the knowledge base (some may have been deleted one by one)
+      include: { _count: { select: { knowledgeEntries: true } } },
     }),
     prisma.knowledgeSource.count({ where }),
   ]);
