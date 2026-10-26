@@ -28,11 +28,14 @@ export interface DashboardData {
     questionnaireId: string;
     questionnaireName: string;
     rowIndex: number;
+    /** 1-based position in the questionnaire, the number the review page shows */
+    number: number;
     questionText: string;
     domain: string;
     confidence: number;
     status: string;
     sourceCount: number;
+    edited: boolean;
   }[];
   kb: {
     total: number;
@@ -95,10 +98,12 @@ export async function getDashboardData(
         id: true,
         confidence: true,
         status: true,
+        editedContent: true,
         _count: { select: { sources: true } },
         question: {
           select: {
             rowIndex: true,
+            questionnaireId: true,
             questionText: true,
             domain: true,
             questionnaire: { select: { id: true, name: true } },
@@ -117,6 +122,18 @@ export async function getDashboardData(
       _count: { _all: true },
     }),
   ]);
+
+  // The review page numbers questions 1..n in row order; show the same number here
+  const numbers = await Promise.all(
+    awaiting.map(
+      (a) =>
+        prisma.question
+          .count({
+            where: { questionnaireId: a.question.questionnaireId, rowIndex: { lt: a.question.rowIndex } },
+          })
+          .then((before) => before + 1),
+    ),
+  );
 
   const byStatus = Object.fromEntries(
     answerGroups.map((g) => [g.status, g._count._all]),
@@ -152,16 +169,18 @@ export async function getDashboardData(
       flagged: byStatus.FLAGGED ?? 0,
       approved: byStatus.APPROVED ?? 0,
     },
-    awaiting: awaiting.map((a) => ({
+    awaiting: awaiting.map((a, i) => ({
       answerId: a.id,
       questionnaireId: a.question.questionnaire.id,
       questionnaireName: a.question.questionnaire.name,
       rowIndex: a.question.rowIndex,
+      number: numbers[i],
       questionText: a.question.questionText,
       domain: a.question.domain,
       confidence: a.confidence,
       status: a.status,
       sourceCount: a._count.sources,
+      edited: !!a.editedContent,
     })),
     kb: {
       total: kbTotal,

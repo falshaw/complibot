@@ -31,6 +31,12 @@ export const PATCH = apiHandler(
     if (!entry)
       return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // A verification covers the text that was checked: new wording needs a new check
+    const textChanged =
+      (!!body.question && body.question !== entry.question) ||
+      (!!body.answer && body.answer !== entry.answer);
+    const unverified = textChanged && entry.isVerified && body.isVerified !== true;
+
     const updated = await prisma.knowledgeEntry.update({
       where: { id: params.id },
       data: {
@@ -39,6 +45,7 @@ export const PATCH = apiHandler(
         ...(body.domain && { domain: body.domain }),
         ...(body.isVerified !== undefined && { isVerified: body.isVerified }),
         ...(body.keywords && { keywords: body.keywords }),
+        ...(unverified && { isVerified: false }),
       },
       include: { source: { select: { name: true, sourceType: true } } },
     });
@@ -58,7 +65,12 @@ export const PATCH = apiHandler(
             : "knowledge.update",
       entityType: "KnowledgeEntry",
       entityId: updated.id,
-      details: { fields: Object.keys(body ?? {}) },
+      details: {
+        fields: Object.keys(body ?? {}).filter(
+          (k) => JSON.stringify(body[k as keyof typeof body]) !== JSON.stringify(entry[k as keyof typeof entry]),
+        ),
+        ...(unverified && { verification: "reset, text changed" }),
+      },
       req,
     });
 

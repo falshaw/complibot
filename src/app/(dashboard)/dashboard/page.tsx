@@ -305,13 +305,13 @@ export default async function DashboardPage() {
                     <span className="min-w-0 flex-1">
                       <b className="block truncate text-[13.5px] font-semibold">
                         <span className="font-mono font-medium text-ink-65">
-                          #{a.rowIndex}
+                          #{a.number}
                         </span>{" "}
                         {a.questionText}
                       </b>
                       <small className="block truncate text-xs text-ink-65">
-                        {a.questionnaireName} · {domainLabel(a.domain)} · confidence{" "}
-                        {a.confidence.toFixed(2)}
+                        {a.questionnaireName} · {domainLabel(a.domain)} ·{" "}
+                        {a.edited ? "edited by hand" : `confidence ${a.confidence.toFixed(2)}`}
                       </small>
                     </span>
                     <span className="flex items-center gap-3 text-xs text-ink-65">

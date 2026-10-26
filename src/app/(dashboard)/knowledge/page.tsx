@@ -3,7 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { BookOpen, Plus, Search, Upload } from "lucide-react";
+import { BookOpen, Plus, Search, Trash2, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { SECURITY_DOMAINS, domainLabel } from "@/lib/ui/labels";
 import { useCan } from "@/components/RoleContext";
@@ -23,7 +25,9 @@ interface Source {
   name: string;
   status: string;
   entriesCreated: number;
+  entriesSkipped: number;
   errorMessage: string | null;
+  _count: { knowledgeEntries: number };
   createdAt: string;
 }
 
@@ -48,6 +52,9 @@ export default function KnowledgePage() {
   const [page, setPage] = useState(1);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [deleting, setDeleting] = useState<Source | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
 
   // Debounce typing
   useEffect(() => {
@@ -78,14 +85,28 @@ export default function KnowledgePage() {
     return () => {
       live = false;
     };
-  }, [key]);
+  }, [key, reload]);
 
   useEffect(() => {
     fetch("/api/sources")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setSources((d?.sources ?? []).slice(0, 5)))
       .catch(() => {});
-  }, []);
+  }, [reload]);
+
+  async function deleteSource() {
+    if (!deleting) return;
+    setBusy(true);
+    const res = await fetch(`/api/sources/${deleting.id}`, { method: "DELETE" }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) {
+      toast.error("The source was not deleted. Try again.");
+      return;
+    }
+    toast.success(`${deleting.name} and its entries deleted`);
+    setDeleting(null);
+    setReload((n) => n + 1);
+  }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -211,19 +232,50 @@ export default function KnowledgePage() {
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                 <span className="min-w-0 truncate font-mono">{s.name}</span>
                 <span className="flex items-center gap-3 text-ink-65">
-                  {s.status === "completed" && <span>{s.entriesCreated} {s.entriesCreated === 1 ? "entry" : "entries"}</span>}
+                  {s.status === "completed" && (
+                    <span>
+                      {s._count.knowledgeEntries} {s._count.knowledgeEntries === 1 ? "entry" : "entries"}
+                      {s.entriesSkipped > 0 && ` · ${s.entriesSkipped} skipped as duplicates`}
+                    </span>
+                  )}
                   {s.status === "failed" && s.errorMessage && (
                     <span className="max-w-[260px] truncate text-red" title={s.errorMessage}>
                       {s.errorMessage}
                     </span>
                   )}
                   <span className={`badge ${SOURCE_TONE[s.status] ?? "b-grey"}`}>{s.status}</span>
+                  {canEdit && s.status !== "processing" && (
+                    <button
+                      type="button"
+                      className="theme-btn !px-2"
+                      aria-label={`Delete ${s.name} and its entries`}
+                      title="Delete this source and its entries"
+                      onClick={() => setDeleting(s)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  )}
                 </span>
               </li>
             ))}
           </ul>
         </section>
       )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete this source?"
+        confirmLabel="Delete source"
+        busy={busy}
+        onConfirm={deleteSource}
+        onCancel={() => setDeleting(null)}
+      >
+        <p>
+          <b className="text-ink">{deleting?.name}</b> and the {deleting?._count.knowledgeEntries} knowledge-base{" "}
+          {deleting?._count.knowledgeEntries === 1 ? "entry" : "entries"} it created will be removed. Answers that cited
+          them keep their text but lose the citation. This cannot be undone.
+        </p>
+      </ConfirmDialog>
     </>
   );
 }

@@ -176,6 +176,7 @@ model KnowledgeSource {
   status         String     @default("pending") // pending, processing, completed, failed
   errorMessage   String?
   entriesCreated Int        @default(0)
+  entriesSkipped Int        @default(0) // same question and answer already in the KB
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 

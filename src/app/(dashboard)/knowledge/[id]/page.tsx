@@ -60,9 +60,10 @@ export default function KnowledgeEntryPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save");
+      const lostVerification = entry?.isVerified && !data.isVerified && body.isVerified === undefined;
       setEntry(data);
       setEditing(false);
-      toast.success(ok);
+      toast.success(lostVerification ? `${ok}. The text changed, so verify it again.` : ok);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save");
     } finally {
