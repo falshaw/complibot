@@ -3,11 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { BookOpen, Plus, Search, Upload } from "lucide-react";
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { SECURITY_DOMAINS, domainLabel } from "@/lib/ui/labels";
-import { can } from "@/lib/permissions";
+import { useCan } from "@/components/RoleContext";
 
 interface KnowledgeEntry {
   id: string;
@@ -38,7 +37,7 @@ const SOURCE_TONE: Record<string, string> = {
 };
 
 export default function KnowledgePage() {
-  const canEdit = can(useSession().data?.user?.role, "knowledge");
+  const canEdit = useCan("knowledge");
   // ?search= from the dashboard search box
   const initial = useSearchParams().get("search") ?? "";
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);

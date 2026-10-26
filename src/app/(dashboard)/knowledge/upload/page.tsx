@@ -7,10 +7,11 @@ import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { plural } from "@/lib/ui/labels";
+import { ReadOnlyNote, useCan } from "@/components/RoleContext";
 
 const COL = /^[A-Z]{1,2}$/;
 
-export default function KnowledgeUploadPage() {
+function KnowledgeUploadForm() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [questionCol, setQuestionCol] = useState("A");
@@ -122,4 +123,18 @@ export default function KnowledgeUploadPage() {
       </form>
     </div>
   );
+}
+
+/** Roles that cannot import knowledge sources get a note instead of a form that would fail. */
+export default function KnowledgeUploadPage() {
+  const allowed = useCan("knowledge");
+  if (!allowed) {
+    return (
+      <>
+        <PageHeader eyebrow="Knowledge base" title="Upload a source" />
+        <ReadOnlyNote permission="knowledge" what="import knowledge sources" />
+      </>
+    );
+  }
+  return <KnowledgeUploadForm />;
 }

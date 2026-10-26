@@ -7,6 +7,7 @@ import { Loader2, Send, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState, LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
 import { domainLabel } from "@/lib/ui/labels";
+import { ReadOnlyNote, useCan } from "@/components/RoleContext";
 
 interface Message {
   role: "assistant" | "user";
@@ -28,7 +29,7 @@ interface InterviewState {
 /** Must match SKIP_RESPONSE in InterviewService (never stored as an entry). */
 const SKIP = "Skip this question";
 
-export default function InterviewSessionPage() {
+function InterviewSessionForm() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [state, setState] = useState<InterviewState | null>(null);
@@ -193,4 +194,18 @@ export default function InterviewSessionPage() {
       )}
     </div>
   );
+}
+
+/** Roles that cannot run the AI interview get a note instead of a form that would fail. */
+export default function InterviewSessionPage() {
+  const allowed = useCan("knowledge");
+  if (!allowed) {
+    return (
+      <>
+        <PageHeader eyebrow="Tools" title="AI interview" />
+        <ReadOnlyNote permission="knowledge" what="run the AI interview, which adds knowledge-base entries" />
+      </>
+    );
+  }
+  return <InterviewSessionForm />;
 }
