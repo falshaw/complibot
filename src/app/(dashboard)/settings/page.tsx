@@ -265,7 +265,7 @@ function AccountSection() {
           className="input"
           type="password"
           aria-label="New password"
-          placeholder={`New password (at least ${PASSWORD_MIN_LENGTH} characters with a special character)`}
+          placeholder="New password"
           autoComplete="new-password"
           value={next}
           onChange={(e) => setNext(e.target.value)}
@@ -279,10 +279,12 @@ function AccountSection() {
           value={repeat}
           onChange={(e) => setRepeat(e.target.value)}
         />
-        {pwError && (
+        {pwError ? (
           <p className="text-[13px] font-medium text-red" role="alert">
             {pwError}
           </p>
+        ) : (
+          <p className="text-xs text-ink-65">At least {PASSWORD_MIN_LENGTH} characters, including a special character.</p>
         )}
         <div>
           <button type="submit" className="btn btn-primary btn-sm" disabled={!!busy || !current || !next || !repeat}>
