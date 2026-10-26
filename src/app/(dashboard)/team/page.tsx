@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Check, Copy, RotateCcw, UserPlus, X } from "lucide-react";
+import { Check, Copy, LockOpen, RotateCcw, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { LoadingBlocks, PageHeader } from "@/components/ui/PageHeader";
+import { useRole } from "@/components/RoleContext";
 
 interface Member {
   id: string;
@@ -14,6 +15,8 @@ interface Member {
   role: string;
   isActive: boolean;
   lastLoginAt: string | null;
+  /** Locked out after 5 failed sign-ins (lifts by itself after 15 minutes). */
+  locked: boolean;
 }
 
 interface Invitation {
@@ -54,7 +57,7 @@ async function fetchTeam(): Promise<{ members: Member[]; invites: Invitation[] }
 export default function TeamPage() {
   const { data: session } = useSession();
   const me = session?.user?.id;
-  const isAdmin = session?.user?.role === "ADMIN";
+  const isAdmin = useRole() === "ADMIN";
   const [members, setMembers] = useState<Member[] | null>(null);
   const [invites, setInvites] = useState<Invitation[]>([]);
   const [showInvite, setShowInvite] = useState(false);
@@ -209,7 +212,8 @@ export default function TeamPage() {
         </form>
       )}
 
-      <section className="card mb-4 overflow-x-auto">
+      {/* relative: keeps the sr-only header text inside the scroll box, so it cannot widen the page */}
+      <section className="card relative mb-4 overflow-x-auto">
         {/* On a phone, role and action share one cell so the table fits 390 px. */}
         <table className="data-table max-sm:[&_td]:px-3 max-sm:[&_th]:px-3">
           <thead>
@@ -232,7 +236,7 @@ export default function TeamPage() {
                       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-bold text-white" aria-hidden>
                         {(m.name || m.email)[0].toUpperCase()}
                       </span>
-                      <span className="min-w-0 max-w-[110px] sm:max-w-[240px]">
+                      <span className="min-w-0 max-w-[120px] sm:max-w-[240px]">
                         <b className="block truncate font-semibold">
                           {m.name || m.email}
                           {self && <span className="ml-1.5 text-xs font-normal text-ink-45">(you)</span>}
@@ -285,6 +289,29 @@ export default function TeamPage() {
                           aria-label={`Remove ${m.email}`}
                         >
                           Remove
+                        </button>
+                      )}
+                      {m.locked && !isAdmin && <span className="badge b-amber">Locked</span>}
+                      {isAdmin && m.locked && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={busy}
+                          aria-label={`Unlock ${m.email}`}
+                          title="Locked after 5 failed sign-ins"
+                          onClick={() =>
+                            run(
+                              fetch("/api/team/members", {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ userId: m.id, unlock: true }),
+                              }),
+                              `${m.email} can sign in again`,
+                              "Could not unlock the member",
+                            )
+                          }
+                        >
+                          <LockOpen className="h-3.5 w-3.5" aria-hidden /> Unlock
                         </button>
                       )}
                       {isAdmin && !self && !m.isActive && (
